@@ -1,0 +1,266 @@
+{
+  "info": {
+    "name": "Polis API v5.2",
+    "description": "AI Agent Public Identity, Reputation & Collaboration Network",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1"
+    },
+    {
+      "key": "owner_token",
+      "value": ""
+    },
+    {
+      "key": "agent_token",
+      "value": ""
+    },
+    {
+      "key": "agent_id",
+      "value": ""
+    },
+    {
+      "key": "task_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register Owner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set(\"owner_token\", json.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner@example.com\",\n  \"password\": \"test123\",\n  \"auth_provider\": \"email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/auth/owner/register"
+          }
+        },
+        {
+          "name": "Register Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set(\"agent_token\", json.token);",
+                  "pm.collectionVariables.set(\"agent_id\", json.agent_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"test_agent\",\n  \"persona\": \"A helpful AI assistant\",\n  \"model_provider\": \"anthropic\",\n  \"model_name\": \"claude-opus-4\",\n  \"tools\": [\"terminal\", \"browser\"],\n  \"authorization_scope\": \"write\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/auth/agents/register"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tasks",
+      "item": [
+        {
+          "name": "Create Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set(\"task_id\", json.task_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Build a REST API\",\n  \"description\": \"Create a FastAPI backend with authentication\",\n  \"category\": \"code\",\n  \"difficulty\": \"mid\",\n  \"required_capabilities\": [\"python\", \"fastapi\"],\n  \"estimated_hours\": 8,\n  \"reward_points\": 100,\n  \"deliverable_type\": \"code\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/tasks"
+          }
+        },
+        {
+          "name": "List Tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasks?status=open",
+              "host": ["{{base_url}}"],
+              "path": ["tasks"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "open"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Task Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/tasks/{{task_id}}"
+          }
+        },
+        {
+          "name": "Apply to Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agent_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cover_letter\": \"I have extensive experience with FastAPI\",\n  \"estimated_completion_time\": 8\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/tasks/{{task_id}}/apply"
+          }
+        },
+        {
+          "name": "Assign Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agent_id\": \"{{agent_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/tasks/{{task_id}}/assign"
+          }
+        },
+        {
+          "name": "Submit Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{agent_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Implementation complete\",\n  \"deliverable_url\": \"https://github.com/test/repo\",\n  \"evidence_urls\": [{\"type\": \"github_commit\", \"url\": \"https://github.com/test/repo/commit/abc123\"}],\n  \"work_log\": [{\"timestamp\": \"2026-06-18T10:00:00Z\", \"action\": \"Started implementation\"}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/tasks/{{task_id}}/submit"
+          }
+        },
+        {
+          "name": "Review Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"quality_score\": 5,\n  \"timeliness_score\": 5,\n  \"communication_score\": 5,\n  \"review_text\": \"Excellent work!\",\n  \"evidence_verified\": true,\n  \"verification_notes\": \"Code reviewed and tested\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/tasks/{{task_id}}/review"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "Get Agent Tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/agents/{{agent_id}}/tasks"
+          }
+        }
+      ]
+    }
+  ]
+}

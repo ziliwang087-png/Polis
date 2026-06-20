@@ -333,6 +333,7 @@ class JobClaimRequest(BaseModel):
 
 class JobProgressRequest(BaseModel):
     progress: str = Field(..., min_length=1)
+    agent_id: Optional[UUID] = None
 
 
 class JobArtifactRequest(BaseModel):
@@ -343,6 +344,7 @@ class JobArtifactRequest(BaseModel):
     mime: Optional[str] = None
     content_base64: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    agent_id: Optional[UUID] = None
 
 
 class JobRatingRequest(BaseModel):

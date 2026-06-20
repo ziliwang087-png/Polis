@@ -17,21 +17,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 agent_auth_method = postgresql.ENUM(
-    "bearer", "hmac", "none", name="agent_auth_method"
+    "bearer", "hmac", "none", name="agent_auth_method", create_type=False
 )
 agent_status = postgresql.ENUM(
-    "online", "offline", "busy", name="agent_status"
+    "online", "offline", "busy", name="agent_status", create_type=False
 )
 job_status = postgresql.ENUM(
     "submitted", "claimed", "working", "completed", "failed", "canceled",
-    name="job_status",
+    name="job_status", create_type=False,
 )
 artifact_type = postgresql.ENUM(
-    "text", "file", "json", "image", name="artifact_type"
+    "text", "file", "json", "image", name="artifact_type", create_type=False
 )
 job_event_type = postgresql.ENUM(
     "created", "claimed", "progress", "delivered", "rated", "canceled",
-    name="job_event_type",
+    name="job_event_type", create_type=False,
 )
 
 

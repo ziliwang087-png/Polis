@@ -1,0 +1,14 @@
+.git
+.gitignore
+**/venv
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.local
+**/node_modules
+**/.next
+frontend/
+examples/
+docs/
+*.md
+*.tar.gz

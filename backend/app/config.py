@@ -2,7 +2,8 @@
 Polis Backend Configuration
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from pydantic import field_validator
+from typing import Optional, List, Union
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
@@ -26,7 +27,20 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: Optional[str] = None
     SUPABASE_STORAGE_BUCKET: str = "polis-attachments"
     
-    # CORS
-    CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:3001"]
+    # CORS — declared as Union[str, List[str]] so pydantic-settings does NOT try
+    # to JSON-parse the env value before our validator runs. Validator below
+    # normalises to List[str], accepting JSON list, comma-separated, or already-list.
+    CORS_ORIGINS: Union[str, List[str]] = "http://localhost:3000,http://localhost:3001"
+
+    @field_validator("CORS_ORIGINS", mode="after")
+    @classmethod
+    def _parse_cors(cls, v):
+        if isinstance(v, list):
+            return v
+        s = str(v).strip()
+        if s.startswith("["):
+            import json
+            return json.loads(s)
+        return [x.strip() for x in s.split(",") if x.strip()]
     
 settings = Settings()

@@ -48,12 +48,17 @@ export default function MePage() {
     return m;
   }, [myAgents.data]);
 
-  /* 后端 GET /jobs 还没实现 mine=sent/received 过滤，前端拉全量后本地过滤。
-   * 当后端将来加上时，把 jobsApi.list() 改成 list({mine:'sent', userId})
-   * 即可平滑切换。 */
-  const allJobs = useQuery({
-    queryKey: ['jobs', 'all'],
-    queryFn: () => jobsApi.list(),
+  /* 后端 GET /jobs?mine=sent/received 已经实现，但仍然保留客户端兜底过滤
+   * 以防部署的 backend 版本落后或将来字段语义变化，避免出现 /me 显示别人
+   * 的任务。 */
+  const sentJobs = useQuery({
+    queryKey: ['jobs', 'mine', 'sent'],
+    queryFn: () => jobsApi.list({ mine: 'sent' }),
+    enabled: isAuthenticated(),
+  });
+  const receivedJobs = useQuery({
+    queryKey: ['jobs', 'mine', 'received'],
+    queryFn: () => jobsApi.list({ mine: 'received' }),
     enabled: isAuthenticated(),
   });
 
@@ -70,8 +75,9 @@ export default function MePage() {
     );
   }
 
-  const sent = (allJobs.data ?? []).filter((j) => j.from_user_id === user.id);
-  const received = (allJobs.data ?? []).filter(
+  // 后端已用 mine 过滤；本地再 filter 一次防御老 backend / 字段不一致
+  const sent = (sentJobs.data ?? []).filter((j) => j.from_user_id === user.id);
+  const received = (receivedJobs.data ?? []).filter(
     (j) => j.to_agent_id && myAgentIdSet.has(j.to_agent_id),
   );
   const agents = myAgents.data ?? [];
@@ -134,7 +140,7 @@ export default function MePage() {
             </Link>
           </span>
         }
-        loading={allJobs.isLoading}
+        loading={sentJobs.isLoading}
         items={sent}
         agentNameMap={agentNameMap}
         currentUserName={user.display_name || user.username}
@@ -151,7 +157,7 @@ export default function MePage() {
             </Link>
           </span>
         }
-        loading={allJobs.isLoading || myAgents.isLoading}
+        loading={receivedJobs.isLoading || myAgents.isLoading}
         items={received}
         agentNameMap={agentNameMap}
       />

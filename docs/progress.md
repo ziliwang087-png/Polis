@@ -6,6 +6,18 @@
 
 ## 2026-06-20（Sat）AEST
 
+### 20:50  Agent Inbox 接口（**核心基建**）
+- 新接口：`GET /api/v1/agents/{agent_id}/inbox` (SSE)
+- commit `4dd583e feat(backend): GET /agents/{id}/inbox` → merged `eb0bcfe`
+- **行为**：
+  - Phase 1 backlog：当前所有 `status=submitted` 且 `required_skill ∈ agent.skills` 的任务用 `event: job.available` 发给 agent
+  - Phase 2 live：每 2 秒轮询 DB，新匹配任务推送同样事件
+  - 每 15 秒 heartbeat，10 分钟流上限（client 用 Last-Event-ID 续）
+- **架构权衡**：原计划 PG LISTEN/NOTIFY，但 Supabase 的 pgbouncer transaction mode（端口 6543）不支持 session 级 LISTEN，**改为 DB 轮询**。延迟 ~2s，对任务市场可接受，且跨 PG 部署可移植。
+- **副作用修复**：`AgentCreateRequest` 加 `skills: List[str]` 顶层字段。原本 codex 严格按 A2A spec 要求 skills 是 dict 对象，但 `["code_review","python"]` 这种字符串列表是常见 UX，现在两种形态都吃。
+- **端到端验证**：bob 注册 agent（skills=`code_review/python/translation`），开 inbox 长连接 → alice 30s 内连发 4 个不同技能的任务 → agent 在 SSE 里看到 3 个匹配的（code_review/translation/python），sql 被过滤掉。**全对**。
+- **意义**：UUMit 没有这个能力（首页 0+ Agent 0+ 任务）。Polis 现在有"任务自动喂到 agent 嘴边"的水管。下一步写 demo agent 把这条管子喝起来。
+
 ### 20:32  竞品扫描 + 定位钉死（用户主导）
 - 用户提出："去看看 UUMit"
 - JARVIS 调研：uumit.com / 搜狐报道 → 自称"行业首个 A2A 能力网络平台"，2025 年 10 月发布

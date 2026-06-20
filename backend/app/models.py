@@ -1,7 +1,7 @@
 """
 Pydantic models for request/response validation
 """
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from uuid import UUID
@@ -54,6 +54,8 @@ class OwnerRegisterResponse(BaseModel):
     token: str
 
 class AgentRegisterRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     name: str = Field(..., min_length=1, max_length=50)
     persona: Optional[str] = None
     model_provider: Optional[str] = None
@@ -220,3 +222,177 @@ class FollowResponse(BaseModel):
 class FeedResponse(BaseModel):
     posts: List[PostResponse]
     total: int
+
+
+# ============ Polis v1 A2A-compatible Models ============
+
+class UserRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6, max_length=128)
+    username: str = Field(..., min_length=3, max_length=64)
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+class UserLoginRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    password: str
+
+
+class UserInfo(BaseModel):
+    id: UUID
+    email: str
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    reputation: int
+    credit_balance: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserAuthResponse(BaseModel):
+    token: str
+    user: UserInfo
+
+
+class AgentSkillSpec(BaseModel):
+    id: Optional[str] = None
+    skill_id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    examples: Optional[List[Dict[str, Any]]] = None
+    inputSchema: Optional[Dict[str, Any]] = None
+    outputSchema: Optional[Dict[str, Any]] = None
+    input_schema: Optional[Dict[str, Any]] = None
+    output_schema: Optional[Dict[str, Any]] = None
+
+
+class AgentCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    endpoint_url: Optional[str] = None
+    websocket_id: Optional[str] = None
+    auth_method: Literal["bearer", "hmac", "none"] = "none"
+    auth_config: Dict[str, Any] = Field(default_factory=dict)
+    agent_card: Dict[str, Any]
+    status: Literal["online", "offline", "busy"] = "offline"
+
+
+class AgentHeartbeatRequest(BaseModel):
+    status: Literal["online", "offline", "busy"] = "online"
+    websocket_id: Optional[str] = None
+
+
+class AgentResponse(BaseModel):
+    id: UUID
+    owner_id: UUID
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    endpoint_url: Optional[str] = None
+    websocket_id: Optional[str] = None
+    auth_method: str
+    agent_card: Dict[str, Any]
+    status: str
+    last_heartbeat_at: Optional[datetime] = None
+    total_jobs: int
+    success_rate: float
+    avg_rating: Optional[float] = None
+    created_at: datetime
+    updated_at: datetime
+    token: Optional[str] = None
+
+
+class AttachmentInput(BaseModel):
+    url: Optional[str] = None
+    filename: str
+    mime: Optional[str] = None
+    content_base64: Optional[str] = None
+
+
+class AttachmentResponse(BaseModel):
+    url: str
+    filename: str
+    mime: Optional[str] = None
+
+
+class JobCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str
+    required_skill: str = Field(..., min_length=1, max_length=128)
+    input_messages: List[Dict[str, Any]] = Field(default_factory=list)
+    attachments: List[AttachmentInput] = Field(default_factory=list)
+
+
+class JobClaimRequest(BaseModel):
+    agent_id: Optional[UUID] = None
+
+
+class JobProgressRequest(BaseModel):
+    progress: str = Field(..., min_length=1)
+
+
+class JobArtifactRequest(BaseModel):
+    type: Literal["text", "file", "json", "image"]
+    content: Optional[str] = None
+    file_url: Optional[str] = None
+    filename: Optional[str] = None
+    mime: Optional[str] = None
+    content_base64: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class JobRatingRequest(BaseModel):
+    stars: int = Field(..., ge=1, le=5)
+    feedback: Optional[str] = None
+
+
+class JobArtifactResponse(BaseModel):
+    id: UUID
+    job_id: UUID
+    type: str
+    content: Optional[str] = None
+    file_url: Optional[str] = None
+    metadata: Dict[str, Any]
+    created_at: datetime
+
+
+class JobRatingResponse(BaseModel):
+    id: UUID
+    job_id: UUID
+    rater_id: UUID
+    stars: int
+    feedback: Optional[str] = None
+    created_at: datetime
+
+
+class JobEventResponse(BaseModel):
+    id: UUID
+    job_id: UUID
+    event_type: str
+    payload: Dict[str, Any]
+    created_at: datetime
+
+
+class JobResponse(BaseModel):
+    id: UUID
+    from_user_id: UUID
+    to_agent_id: Optional[UUID] = None
+    title: str
+    description: str
+    required_skill: str
+    input_messages: List[Dict[str, Any]]
+    attachments: List[Dict[str, Any]]
+    status: str
+    progress: Optional[str] = None
+    created_at: datetime
+    claimed_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    artifacts: List[JobArtifactResponse] = Field(default_factory=list)
+    rating: Optional[JobRatingResponse] = None
+    events: List[JobEventResponse] = Field(default_factory=list)
+    a2a_task: Dict[str, Any] = Field(default_factory=dict)

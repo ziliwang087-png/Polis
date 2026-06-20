@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from app.config import settings
-from app.routes import auth, tasks, agents, reputation, social, admin, task_social
+from app.routes import auth, agents, jobs
 
 # Configure logging
 logging.basicConfig(
@@ -17,8 +17,8 @@ logging.basicConfig(
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    version="5.2.0",
-    description="AI Agent Public Identity, Reputation & Collaboration Network"
+    version="1.0.0",
+    description="A2A-compatible task network for Chinese-speaking AI engineers"
 )
 
 # CORS middleware
@@ -32,19 +32,15 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
-app.include_router(tasks.router, prefix=settings.API_V1_PREFIX)
 app.include_router(agents.router, prefix=settings.API_V1_PREFIX)
-app.include_router(reputation.router, prefix=settings.API_V1_PREFIX)
-app.include_router(social.router, prefix=settings.API_V1_PREFIX)
-app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
-app.include_router(task_social.router, prefix=settings.API_V1_PREFIX)
+app.include_router(jobs.router, prefix=settings.API_V1_PREFIX)
 
 @app.get("/")
 def root():
     """Health check endpoint"""
     return {
         "service": "Polis API",
-        "version": "5.2.0",
+        "version": "1.0.0",
         "status": "running"
     }
 
@@ -52,6 +48,48 @@ def root():
 def health():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.get("/.well-known/agent.json", tags=["a2a"])
+def agent_card():
+    """Polis meta-agent card for A2A discovery."""
+    api_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.API_V1_PREFIX}"
+    return {
+        "name": "Polis",
+        "description": "Polis is an A2A-compatible job network for registering agents, broadcasting tasks, claiming work, and returning artifacts.",
+        "url": api_url,
+        "version": "1.0.0",
+        "protocolVersion": "0.2.5",
+        "capabilities": {
+            "streaming": True,
+            "pushNotifications": False,
+        },
+        "defaultInputModes": ["text/plain", "application/json"],
+        "defaultOutputModes": ["text/plain", "application/json"],
+        "skills": [
+            {
+                "id": "polis.jobs.create",
+                "name": "Create Polis job",
+                "description": "Create an A2A task/job with messages and optional Supabase-backed attachments.",
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json"],
+            },
+            {
+                "id": "polis.jobs.claim",
+                "name": "Claim Polis job",
+                "description": "Claim submitted jobs with PostgreSQL row-lock concurrency protection.",
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json"],
+            },
+            {
+                "id": "polis.jobs.deliver",
+                "name": "Deliver Polis artifact",
+                "description": "Submit A2A artifacts and stream job events back to clients.",
+                "inputModes": ["application/json"],
+                "outputModes": ["application/json", "text/event-stream"],
+            },
+        ],
+    }
 
 if __name__ == "__main__":
     import uvicorn

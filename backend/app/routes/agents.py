@@ -1,110 +1,211 @@
 """
-Agent API routes
+Polis v1 A2A agent routes.
 """
-from fastapi import APIRouter, HTTPException, status
-from uuid import UUID
-from typing import List, Dict, Any
-from pydantic import BaseModel
-from app.models import AgentTasksResponse
-from app.database import get_db_connection
 import logging
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Header, HTTPException, status, Depends
+from psycopg2.extras import Json
+
+from app.auth import create_access_token
+from app.database import get_db_connection
+from app.dependencies import get_current_owner, get_current_user
+from app.models import AgentCreateRequest, AgentHeartbeatRequest, AgentResponse
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
 
 
-class AgentApplicationsResponse(BaseModel):
-    applications: List[Dict[str, Any]]
+def _agent_response(row, token: Optional[str] = None) -> AgentResponse:
+    return AgentResponse(
+        id=row["id"],
+        owner_id=row["owner_id"],
+        name=row["name"],
+        display_name=row.get("display_name"),
+        description=row.get("description"),
+        endpoint_url=row.get("endpoint_url"),
+        websocket_id=row.get("websocket_id"),
+        auth_method=row.get("auth_method", "none"),
+        agent_card=row.get("agent_card") or {},
+        status=row.get("status", "offline"),
+        last_heartbeat_at=row.get("last_heartbeat_at"),
+        total_jobs=row.get("total_jobs", 0),
+        success_rate=float(row.get("success_rate") or 0),
+        avg_rating=row.get("avg_rating"),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        token=token,
+    )
 
 
-@router.get("/{agent_id}/applications", response_model=AgentApplicationsResponse)
-def get_agent_applications(agent_id: UUID):
-    """Return tasks this agent has applied to (joined with task info)."""
+def _card_skills(agent_card: Dict[str, Any]) -> List[Dict[str, Any]]:
+    skills = agent_card.get("skills") or []
+    return [skill for skill in skills if isinstance(skill, dict)]
+
+
+@router.post("", response_model=AgentResponse)
+def create_agent(
+    request: AgentCreateRequest,
+    owner_id: UUID = Depends(get_current_owner),
+):
+    agent_card = dict(request.agent_card)
+    agent_card.setdefault("name", request.name)
+    if request.description:
+        agent_card.setdefault("description", request.description)
+    if request.endpoint_url:
+        agent_card.setdefault("url", request.endpoint_url)
+
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                """
-                SELECT
-                    a.id              AS application_id,
-                    a.task_id,
-                    a.cover_letter,
-                    a.estimated_completion_time,
-                    a.status          AS application_status,
-                    a.applied_at,
-                    t.id              AS task_id_dup,
-                    t.title,
-                    t.description,
-                    t.category,
-                    t.difficulty,
-                    t.reward_points,
-                    t.status          AS task_status,
-                    t.deadline,
-                    t.cover_emoji,
-                    t.cover_gradient,
-                    t.skills_required,
-                    t.assigned_agent_id,
-                    o.display_name    AS owner_display_name,
-                    o.avatar_gradient AS owner_avatar_gradient
-                FROM task_applications a
-                JOIN tasks t  ON t.id = a.task_id
-                LEFT JOIN owners o ON o.id = t.owner_id
-                WHERE a.agent_id = %s
-                ORDER BY a.applied_at DESC
-                """,
-                (str(agent_id),),
+                "SELECT id FROM agents WHERE owner_id = %s AND name = %s",
+                (str(owner_id), request.name),
             )
-            rows = cur.fetchall()
-            return AgentApplicationsResponse(
-                applications=[dict(row) for row in rows]
-            )
-    except Exception as e:
-        logger.error(f"Agent applications fetch failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Agent applications fetch failed",
-        )
-
-@router.get("/{agent_id}/tasks", response_model=AgentTasksResponse)
-def get_agent_tasks(agent_id: UUID):
-    """Get task history for an agent"""
-    try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            
-            # Verify agent exists
-            cur.execute("SELECT id FROM agents WHERE id = %s", (str(agent_id),))
-            if not cur.fetchone():
+            if cur.fetchone():
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Agent not found"
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Agent name already registered for this user",
                 )
-            
-            # Get tasks
+
             cur.execute(
                 """
-                SELECT 
-                    t.*,
-                    ts.submitted_at,
-                    tr.rating,
-                    tr.review_text
-                FROM tasks t
-                LEFT JOIN task_submissions ts ON t.id = ts.task_id AND ts.agent_id = %s
-                LEFT JOIN task_reviews tr ON ts.id = tr.submission_id
-                WHERE t.assigned_agent_id = %s
-                ORDER BY t.created_at DESC
+                INSERT INTO agents (
+                    owner_id, name, display_name, description, endpoint_url,
+                    websocket_id, auth_method, auth_config, agent_card, status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
                 """,
-                (str(agent_id), str(agent_id))
+                (
+                    str(owner_id),
+                    request.name,
+                    request.display_name,
+                    request.description,
+                    request.endpoint_url,
+                    request.websocket_id,
+                    request.auth_method,
+                    Json(request.auth_config),
+                    Json(agent_card),
+                    request.status,
+                ),
             )
-            tasks = cur.fetchall()
-            
-            return AgentTasksResponse(tasks=[dict(task) for task in tasks])
-            
+            row = cur.fetchone()
+
+            for skill in _card_skills(agent_card):
+                skill_id = skill.get("id") or skill.get("skill_id") or skill.get("name")
+                if not skill_id or not skill.get("name"):
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO agent_skills (
+                        agent_id, skill_id, name, description, examples,
+                        input_schema, output_schema
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (agent_id, skill_id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        description = EXCLUDED.description,
+                        examples = EXCLUDED.examples,
+                        input_schema = EXCLUDED.input_schema,
+                        output_schema = EXCLUDED.output_schema
+                    """,
+                    (
+                        str(row["id"]),
+                        skill_id,
+                        skill["name"],
+                        skill.get("description"),
+                        Json(skill.get("examples")),
+                        Json(skill.get("inputSchema") or skill.get("input_schema")),
+                        Json(skill.get("outputSchema") or skill.get("output_schema")),
+                    ),
+                )
+
+        token = create_access_token({"sub": str(row["id"]), "type": "agent"})
+        return _agent_response(row, token=token)
+
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Agent tasks fetch failed: {e}")
+    except Exception as exc:
+        logger.exception("Agent registration failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Agent tasks fetch failed"
+            detail=f"Agent registration failed: {exc}",
         )
+
+
+@router.get("", response_model=List[AgentResponse])
+def list_agents():
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM agents ORDER BY created_at DESC")
+        return [_agent_response(row) for row in cur.fetchall()]
+
+
+@router.get("/{agent_id}", response_model=AgentResponse)
+def get_agent(agent_id: UUID):
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM agents WHERE id = %s", (str(agent_id),))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        return _agent_response(row)
+
+
+@router.post("/{agent_id}/heartbeat", response_model=AgentResponse)
+def heartbeat(
+    agent_id: UUID,
+    request: AgentHeartbeatRequest,
+    authorization: Optional[str] = Header(None),
+):
+    subject_id, subject_type = get_current_user(authorization)
+
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM agents WHERE id = %s", (str(agent_id),))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        if subject_type == "agent" and row["id"] != subject_id:
+            raise HTTPException(status_code=403, detail="Agent token mismatch")
+        if subject_type == "user" and row["owner_id"] != subject_id:
+            raise HTTPException(status_code=403, detail="You do not own this agent")
+
+        if request.websocket_id:
+            cur.execute(
+                """
+                UPDATE agents
+                SET status = %s, websocket_id = %s, last_heartbeat_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (request.status, request.websocket_id, str(agent_id)),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE agents
+                SET status = %s, last_heartbeat_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (request.status, str(agent_id)),
+            )
+        return _agent_response(cur.fetchone())
+
+
+@router.delete("/{agent_id}", response_model=dict)
+def delete_agent(agent_id: UUID, owner_id: UUID = Depends(get_current_owner)):
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM agents WHERE id = %s AND owner_id = %s RETURNING id",
+            (str(agent_id), str(owner_id)),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Agent not found")
+        return {"deleted": True}

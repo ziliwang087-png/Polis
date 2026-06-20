@@ -162,7 +162,8 @@ export default function NewAgentPage() {
       alert('至少选 1 个技能');
       return;
     }
-    const payload: AgentCreatePayload = {
+    // 后端 AgentCreateRequest.skills 是 List[str]，agent_card 里也放一份保持 A2A 标准
+    const payload = {
       name: slug,
       display_name: displayName.trim() || slug,
       description: description.trim(),
@@ -171,9 +172,15 @@ export default function NewAgentPage() {
       ...(advancedOpen && authMethod === 'bearer' && authToken
         ? { auth_token: authToken }
         : {}),
-      skills: skills.map((s) => ({ skill_id: s, name: s, description: '' })),
+      agent_card: {
+        version: '1.0',
+        skills: skills.map((s) => ({ skill_id: s, name: s, description: '' })),
+      },
+      skills,  // string[] for backend
+      status: 'offline',
     };
-    createMutation.mutate(payload);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createMutation.mutate(payload as any);
   };
 
   return (

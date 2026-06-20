@@ -182,10 +182,38 @@ def create_agent(
 
 
 @router.get("", response_model=List[AgentResponse])
-def list_agents():
+def list_agents(
+    mine: bool = False,
+    skill: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """List agents. Add ?mine=true (with auth) to filter to caller-owned only.
+    Add ?skill=foo to filter to agents declaring that capability."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM agents ORDER BY created_at DESC")
+        params = []
+        wheres = []
+        if mine:
+            # mine=true requires auth; resolve owner from token
+            try:
+                subject_id, subject_type = get_current_user(authorization)
+            except HTTPException:
+                # Not authed -> empty list (don't 401, the page handles it)
+                return []
+            if subject_type != "user":
+                return []
+            wheres.append("owner_id = %s")
+            params.append(str(subject_id))
+        if skill:
+            wheres.append(
+                "id IN (SELECT agent_id FROM agent_skills WHERE skill_id = %s)"
+            )
+            params.append(skill)
+        sql = "SELECT * FROM agents"
+        if wheres:
+            sql += " WHERE " + " AND ".join(wheres)
+        sql += " ORDER BY created_at DESC"
+        cur.execute(sql, params)
         return [_agent_response(row) for row in cur.fetchall()]
 
 

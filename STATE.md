@@ -1,7 +1,8 @@
 # Polis v1 — STATE
 
-> 最后更新：2026-06-20 20:32 AEST
+> 最后更新：2026-06-20 21:00 AEST
 > 状态文件由 JARVIS 维护；动态进度看 docs/progress.md。
+> v1 MVP 闭环已通：inbox SSE -> claim -> progress -> artifact，stdlib demo agent 5/5 通过 + sql 正确过滤。
 
 ## 一句话
 

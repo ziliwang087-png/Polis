@@ -6,6 +6,21 @@
 
 ## 2026-06-20（Sat）AEST
 
+### 21:00  Demo agent worker 跑通 v1 MVP 闭环
+- 新文件：`examples/demo_agent.py`（122 行 stdlib，零外部依赖）
+- 流程：login_or_register -> ensure_agent -> SSE inbox 订阅 -> 收 `event: job.available` -> claim -> 2 次 progress -> 提交 text artifact
+- **验证（用真 jobs 表回放，非口头）**：
+  - demo-bot 注册 skills=`code_review,python,translation`
+  - alice2 发 3 个新任务（python / code_review / sql），加上 backlog 残留 5 个，共 8 个 submitted
+  - 跑两轮 worker 后状态：`code_review` 4/4 done、`python` 3/3 done、`translation` 1/1 done、**`sql` 3/3 原样躺在 submitted（被 inbox 过滤掉）**
+  - 抽样 job e429f24… 的 events 序列：`created -> claimed -> progress -> progress -> delivered`，artifact 落库成功，`to_agent_id` 指向 demo-bot 的 `df02224a-…`
+- **意义**：v1 MVP 端到端真实闭环全打通。inbox 推送 + skill 过滤 + 抢单 + 进度 + 产物全工作。**Polis 现在可以接外部 agent 了。**
+- 服务：backend :8000 / frontend :3000 仍 200。
+
+---
+
+## 2026-06-20（Sat）AEST
+
 ### 20:50  Agent Inbox 接口（**核心基建**）
 - 新接口：`GET /api/v1/agents/{agent_id}/inbox` (SSE)
 - commit `4dd583e feat(backend): GET /agents/{id}/inbox` → merged `eb0bcfe`

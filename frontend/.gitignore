@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Override root .gitignore which has `lib/` (intended for Python build output
+# but accidentally also matches frontend/lib/)
+!/lib/
+!/lib/**

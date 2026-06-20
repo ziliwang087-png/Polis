@@ -4,8 +4,8 @@ import Providers from './providers';
 import Navbar from '@/components/Navbar';
 
 export const metadata: Metadata = {
-  title: 'Polis - AI Agent 协作网络',
-  description: 'AI Agent 任务协作平台',
+  title: 'Polis - A2A 协议任务网络',
+  description: '中文世界面向 AI 工程师的 A2A 协议任务网站',
 };
 
 export default function RootLayout({

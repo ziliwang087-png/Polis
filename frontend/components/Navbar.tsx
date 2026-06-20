@@ -1,72 +1,74 @@
 /**
- * 顶部导航栏 - 社交风格
+ * 顶部导航栏 —— v1：任务广场 / 我的 Agent / Dashboard
  */
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/store';
-import { useRouter } from 'next/navigation';
-import { HomeIcon, TrophyIcon, FeedIcon } from './icons/Icon';
+import { HomeIcon, BotIcon, ChartIcon, RocketIcon } from './icons/Icon';
 
 export default function Navbar() {
-  const { isAuthenticated, userType, logout } = useAuthStore();
+  const pathname = usePathname();
   const router = useRouter();
+  const { user, isAuthenticated, logout } = useAuthStore();
+  const authed = isAuthenticated();
 
   const handleLogout = () => {
     logout();
     router.push('/');
   };
 
+  const navLink = (href: string, label: string, icon: React.ReactNode) => {
+    const active = pathname === href || pathname?.startsWith(href + '/');
+    return (
+      <Link
+        href={href}
+        className={`flex items-center gap-1.5 transition-colors ${
+          active ? 'text-blue-600' : 'text-gray-600 hover:text-blue-600'
+        }`}
+      >
+        {icon}
+        <span>{label}</span>
+      </Link>
+    );
+  };
+
   return (
     <nav className="bg-white backdrop-filter backdrop-blur-lg bg-opacity-95 mx-6 mt-6 rounded-2xl sticky top-6 z-50 shadow-sm">
       <div className="max-w-6xl mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
-          {/* 左侧 Logo 和导航 */}
+          {/* 左：Logo + 导航 */}
           <div className="flex items-center space-x-8">
-            <Link href="/" className="text-2xl font-bold" style={{ color: '#5b8def' }}>
+            <Link
+              href="/"
+              className="text-2xl font-bold tracking-tight"
+              style={{ color: '#5b8def' }}
+            >
               Polis
             </Link>
             <div className="hidden md:flex space-x-6 text-sm font-medium">
-              <Link 
-                href="/" 
-                className="text-gray-900 hover:text-blue-600 transition-colors flex items-center gap-1.5"
-              >
-                <HomeIcon size={16} />
-                <span>广场</span>
-              </Link>
-              <Link 
-                href="/leaderboard" 
-                className="text-gray-600 hover:text-blue-600 transition-colors flex items-center gap-1.5"
-              >
-                <TrophyIcon size={16} />
-                <span>排行榜</span>
-              </Link>
-              <Link 
-                href="/feed" 
-                className="text-gray-600 hover:text-blue-600 transition-colors flex items-center gap-1.5"
-              >
-                <FeedIcon size={16} />
-                <span>动态</span>
-              </Link>
+              {navLink('/', '任务广场', <HomeIcon size={16} />)}
+              {authed && navLink('/agents', '我的 Agent', <BotIcon size={16} />)}
+              {authed && navLink('/me', 'Dashboard', <ChartIcon size={16} />)}
             </div>
           </div>
 
-          {/* 右侧按钮 */}
+          {/* 右：操作区 */}
           <div className="flex items-center space-x-3">
-            {isAuthenticated() ? (
+            {authed ? (
               <>
-                <Link 
-                  href="/tasks/new"
-                  className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-xl font-medium transition-colors"
+                <Link
+                  href="/jobs/new"
+                  className="px-4 py-2 text-sm text-white rounded-xl font-medium transition-all hover:shadow-md flex items-center gap-1.5"
+                  style={{ background: '#5b8def' }}
                 >
-                  发布任务
+                  <RocketIcon size={15} strokeWidth={2} />
+                  <span>发任务</span>
                 </Link>
-                <Link 
-                  href={`/profile/${userType}`}
-                  className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-xl font-medium transition-colors"
-                >
-                  我的主页
-                </Link>
+                <span className="hidden sm:inline text-sm text-gray-600">
+                  {user?.display_name || user?.username}
+                </span>
                 <button
                   onClick={handleLogout}
                   className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-xl font-medium transition-colors"

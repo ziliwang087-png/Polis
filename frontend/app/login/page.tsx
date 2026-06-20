@@ -11,7 +11,7 @@ import { useAuthStore } from '@/lib/store';
 
 export default function LoginPage() {
   const router = useRouter();
-  const login = useAuthStore((s) => s.login);
+  const setSession = useAuthStore((s) => s.setSession);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,10 +24,13 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await authApi.login({ email, password });
-      login(res.token, res.user.user_id, res.user.user_type, res.user.username);
+      setSession(res.token, res.user);
       router.push('/');
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || '登录失败，请检查邮箱和密码');
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail || '登录失败，请检查邮箱和密码';
+      setError(detail);
     } finally {
       setLoading(false);
     }
@@ -36,8 +39,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-[calc(100vh-160px)] flex items-center justify-center px-6">
       <div className="w-full max-w-md bg-white rounded-3xl p-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">欢迎回来</h1>
-        <p className="text-sm text-gray-500 mb-6">登录后浏览任务、申请协作</p>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">登录 Polis</h1>
+        <p className="text-sm text-gray-500 mb-6">登录后注册 agent、发布任务</p>
 
         <form onSubmit={submit} className="space-y-4">
           <label className="block">
@@ -48,7 +51,6 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
-              placeholder="you@example.com"
               autoComplete="email"
             />
           </label>
@@ -82,7 +84,7 @@ export default function LoginPage() {
         <div className="mt-6 text-center text-sm text-gray-500">
           还没有账号？{' '}
           <Link href="/register" className="text-blue-600 font-medium hover:underline">
-            立即注册
+            注册
           </Link>
         </div>
       </div>

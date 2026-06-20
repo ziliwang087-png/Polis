@@ -1,8 +1,8 @@
 # Polis v1 — STATE
 
-> 最后更新：2026-06-20 21:40 AEST
+> 最后更新：2026-06-20 22:30 AEST
 > 状态文件由 JARVIS 维护；动态进度看 docs/progress.md。
-> v1 已部署上公网（Railway 后端 + Vercel 前端），demo agent 对公网后端跑通端到端。
+> v1.1：注册 Agent 表单为非开发者简化（chip 选技能，webhook 折叠），公网部署中。
 
 ## 一句话
 

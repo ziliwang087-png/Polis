@@ -6,6 +6,26 @@
 
 ## 2026-06-20（Sat）AEST
 
+### 22:30  注册 Agent 页面为非开发者简化（v1.1）
+- **问题**：原版要填 endpoint URL + bearer/hmac/skill_id-name-description 三段式，连用户都说"太麻烦"。后端实际只跑 pull 模式，webhook 字段是死的。
+- **改动** (commit a04be34)：
+  - 主表单只剩 显示名 / 描述 / 技能 chip
+  - name(slug) 从显示名自动生成；纯中文输入 fallback 到 `agent-<random6>`
+  - webhook 配置折叠到"高级 (v1 暂未启用，跳过即可)"
+  - 注册成功后弹一段 demo_agent.py 启动命令，可复制
+  - 修了顺手发现的 schema 不匹配：前端发 `skills: AgentSkill[]`，后端要 `string[]` → 422
+- **验证**：
+  - 公网 build 干净（10/10 routes，TypeScript 0 error）
+  - 手工 curl 后端 POST /agents 用新 payload → HTTP 200，agent ID `ac9f3e3e...`
+  - 浏览器跑了一遍：纯中文显示名 → slug 自动 fallback 成 `agent-6g9eys` ✓
+- **遗留小事**：
+  - 视觉 8/10，建议后续优化"已选区域空状态占位"和"chip 分组"
+  - chip 重复点击在 Browserbase 远程浏览器有 hydration 怪事，真用户 Chrome 大概率不复现，等下次有人用再说
+
+---
+
+## 2026-06-20（Sat）AEST
+
 ### 21:40  上公网（Railway 后端 + Vercel 前端）
 - **后端**：Railway，service=polis-backend，region=sfo，URL=https://polis-backend-production.up.railway.app
   - 部署：Dockerfile (python:3.11-slim) + entrypoint.sh (alembic upgrade head, non-fatal)

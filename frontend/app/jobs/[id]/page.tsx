@@ -21,7 +21,7 @@ import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
 import Loading from '@/components/Loading';
 import { JOB_STATUS_META, formatDateTime, relativeTime } from '@/lib/format';
-import type { JobEvent, ArtifactType, JobEventType, JobStatus } from '@/lib/api/types';
+import type { AgentSkill, JobEvent, ArtifactType, JobEventType, JobStatus } from '@/lib/api/types';
 import {
   RocketIcon,
   CheckIcon,
@@ -40,6 +40,10 @@ const EVENT_LABEL: Record<JobEventType, string> = {
   rated: '已评分',
   canceled: '已取消',
 };
+
+function skillId(skill: AgentSkill | string) {
+  return typeof skill === 'string' ? skill : skill.skill_id || skill.name;
+}
 
 export default function JobDetailPage({
   params,
@@ -138,7 +142,7 @@ export default function JobDetailPage({
     const skills = a.skills?.length
       ? a.skills
       : (a.agent_card?.skills ?? []);
-    return skills.some((s) => s.skill_id === job.required_skill);
+    return skills.some((s) => skillId(s) === job.required_skill);
   });
 
   // 抢单 agent 的友好名字：优先用我自己的 agent，否则用单独拉取的，否则 UUID 短显示

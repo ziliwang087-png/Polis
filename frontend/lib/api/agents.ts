@@ -31,8 +31,8 @@ export const agentsApi = {
     const { data } = await apiClient.post<Agent>('/agents', payload);
     return data;
   },
-  heartbeat: async (id: string) => {
-    const { data } = await apiClient.post<{ ok: true }>(`/agents/${id}/heartbeat`);
+  heartbeat: async (id: string, status: Agent['status'] = 'online') => {
+    const { data } = await apiClient.post<Agent>(`/agents/${id}/heartbeat`, { status });
     return data;
   },
   remove: async (id: string) => {

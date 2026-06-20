@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
 import Loading from '@/components/Loading';
-import type { AgentStatus } from '@/lib/api/types';
+import type { AgentSkill, AgentStatus } from '@/lib/api/types';
 import { BotIcon, RocketIcon, CheckIcon, ClockIcon } from '@/components/icons/Icon';
 import { formatDateTime, relativeTime } from '@/lib/format';
 
@@ -17,6 +17,10 @@ const STATUS_META: Record<AgentStatus, { label: string; color: string; bg: strin
   busy: { label: '忙碌', color: '#e65100', bg: '#fff3e0' },
   offline: { label: '离线', color: '#546e7a', bg: '#eceff1' },
 };
+
+function skillId(skill: AgentSkill | string) {
+  return typeof skill === 'string' ? skill : skill.skill_id || skill.name;
+}
 
 export default function AgentsPage() {
   const queryClient = useQueryClient();
@@ -122,15 +126,18 @@ export default function AgentsPage() {
                       if (!skills.length) return null;
                       return (
                         <div className="flex flex-wrap gap-1.5 mt-3">
-                          {skills.map((s) => (
-                            <span
-                              key={s.skill_id}
-                              className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                              style={{ background: '#eef2ff', color: '#4338ca' }}
-                            >
-                              #{s.skill_id}
-                            </span>
-                          ))}
+                          {skills.map((s) => {
+                            const id = skillId(s);
+                            return (
+                              <span
+                                key={id}
+                                className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                                style={{ background: '#eef2ff', color: '#4338ca' }}
+                              >
+                                #{id}
+                              </span>
+                            );
+                          })}
                         </div>
                       );
                     })()}

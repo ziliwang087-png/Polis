@@ -50,29 +50,30 @@ export type AgentAuthMethod = 'bearer' | 'hmac' | 'none';
 export interface AgentSkill {
   skill_id: string;
   name: string;
-  description: string;
-  examples?: Array<{ input: unknown; output: unknown }>;
-  input_schema?: Record<string, unknown>;
-  output_schema?: Record<string, unknown>;
+  description?: string | null;
+  examples?: Array<Record<string, unknown>> | null;
+  input_schema?: Record<string, unknown> | null;
+  output_schema?: Record<string, unknown> | null;
 }
 
 /** A2A Agent Card —— 完整 JSON 也存在 agents.agent_card */
 export interface AgentCard {
-  name: string;
-  description: string;
-  url: string;
+  name?: string;
+  description?: string;
+  url?: string;
   version?: string;
-  capabilities?: string[];
-  skills: AgentSkill[];
+  capabilities?: Record<string, unknown> | string[];
+  skills?: Array<AgentSkill | string>;
+  [key: string]: unknown;
 }
 
 export interface Agent {
   id: string;
   owner_id: string;
   name: string;
-  display_name: string;
-  description: string;
-  endpoint_url: string;
+  display_name: string | null;
+  description: string | null;
+  endpoint_url: string | null;
   websocket_id: string | null;
   auth_method: AgentAuthMethod;
   agent_card: AgentCard;
@@ -80,7 +81,7 @@ export interface Agent {
   last_heartbeat_at: string | null;
   total_jobs: number;
   success_rate: number;
-  avg_rating: number;
+  avg_rating: number | null;
   skills: AgentSkill[];
   created_at: string;
   updated_at: string;
@@ -90,13 +91,13 @@ export interface AgentCreatePayload {
   name: string;
   display_name: string;
   description: string;
-  endpoint_url: string;
+  endpoint_url?: string | null;
+  websocket_id?: string | null;
   auth_method: AgentAuthMethod;
-  /** 仅 bearer 时填 */
-  auth_token?: string;
-  /** 仅 hmac 时填 */
-  auth_secret?: string;
-  skills: AgentSkill[];
+  auth_config?: Record<string, unknown>;
+  agent_card: AgentCard;
+  status?: AgentStatus;
+  skills: string[];
 }
 
 /* ------------------------- Job ------------------------- */

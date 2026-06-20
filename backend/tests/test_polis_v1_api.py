@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -170,7 +171,11 @@ class FakeCursor:
             return
 
         if compact.startswith("insert into agent_skills"):
-            agent_id, skill_id, name, description, examples, input_schema, output_schema = params[:7]
+            if len(params) >= 7:
+                agent_id, skill_id, name, description, examples, input_schema, output_schema = params[:7]
+            else:
+                agent_id, skill_id, name = params[:3]
+                description = examples = input_schema = output_schema = None
             sid = uuid.uuid4()
             self.store.agent_skills[sid] = {
                 "id": sid,
@@ -193,6 +198,22 @@ class FakeCursor:
         if "select * from agents where owner_id = %s" in compact:
             owner_id = uuid.UUID(str(params[0]))
             self._rows = [row for row in self.store.agents.values() if row["owner_id"] == owner_id]
+            return
+
+        if "select skill_id, name, description, examples, input_schema, output_schema from agent_skills where agent_id = %s" in compact:
+            agent_id = uuid.UUID(str(params[0]))
+            self._rows = [
+                {
+                    "skill_id": row["skill_id"],
+                    "name": row["name"],
+                    "description": row["description"],
+                    "examples": row["examples"],
+                    "input_schema": row["input_schema"],
+                    "output_schema": row["output_schema"],
+                }
+                for row in self.store.agent_skills.values()
+                if row["agent_id"] == agent_id
+            ]
             return
 
         if "select * from agents" in compact and "where" not in compact:
@@ -271,12 +292,43 @@ class FakeCursor:
 
         if compact.startswith("select * from jobs where 1=1"):
             rows = list(self.store.jobs.values())
+            idx = 0
             if "status = %s" in compact:
-                rows = [row for row in rows if row["status"] == params[0]]
+                rows = [row for row in rows if row["status"] == params[idx]]
+                idx += 1
             if "required_skill = %s" in compact:
-                skill = params[-1]
+                skill = params[idx]
+                idx += 1
                 rows = [row for row in rows if row["required_skill"] == skill]
+            if "from_user_id = %s" in compact:
+                user_id = uuid.UUID(str(params[idx]))
+                idx += 1
+                rows = [row for row in rows if row["from_user_id"] == user_id]
+            if "to_agent_id = any(%s::uuid[])" in compact:
+                agent_ids = {uuid.UUID(str(agent_id)) for agent_id in params[idx]}
+                rows = [row for row in rows if row["to_agent_id"] in agent_ids]
             self._rows = rows
+            return
+
+        if compact.startswith("select * from jobs where status = 'submitted'"):
+            skill_values = set(params[0])
+            rows = [
+                row for row in self.store.jobs.values()
+                if row["status"] == "submitted" and row["required_skill"] in skill_values
+            ]
+            if "not (id = any(%s::uuid[]))" in compact:
+                seen_ids = {uuid.UUID(str(job_id)) for job_id in params[1]}
+                rows = [row for row in rows if row["id"] not in seen_ids]
+            self._rows = rows
+            return
+
+        if compact.startswith("select id from agents where owner_id = %s"):
+            owner_id = uuid.UUID(str(params[0]))
+            self._rows = [
+                {"id": row["id"]}
+                for row in self.store.agents.values()
+                if row["owner_id"] == owner_id
+            ]
             return
 
         if compact.startswith("update jobs set to_agent_id"):
@@ -575,6 +627,222 @@ def test_agent_card_discovery_is_a2a_compatible(polis_client):
     assert card["url"].endswith("/api/v1")
     assert card["capabilities"]["streaming"] is True
     assert any(skill["id"] == "polis.jobs.create" for skill in card["skills"])
+
+
+def test_agent_responses_include_normalized_skills(polis_client):
+    user_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "agent-owner@example.com",
+            "password": "secret123",
+            "username": "agentowner",
+        },
+    )
+    token = user_response.json()["token"]
+
+    create_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "worker",
+            "display_name": "Worker",
+            "description": "Does useful work",
+            "auth_method": "none",
+            "agent_card": {"version": "1.0", "skills": ["python"]},
+            "skills": ["translation"],
+        },
+    )
+    assert create_response.status_code == 200
+    assert {skill["skill_id"] for skill in create_response.json()["skills"]} == {
+        "python",
+        "translation",
+    }
+
+    list_response = polis_client.get(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"mine": "true"},
+    )
+    assert list_response.status_code == 200
+    assert {skill["skill_id"] for skill in list_response.json()[0]["skills"]} == {
+        "python",
+        "translation",
+    }
+
+
+def test_job_events_require_authorized_query_token_for_eventsource(polis_client):
+    user_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "events@example.com",
+            "password": "secret123",
+            "username": "events",
+        },
+    )
+    token = user_response.json()["token"]
+    job_response = polis_client.post(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "Private event stream",
+            "description": "Only the owner can read events.",
+            "required_skill": "privacy",
+            "input_messages": [],
+            "attachments": [],
+        },
+    )
+    job_id = job_response.json()["id"]
+
+    unauth_response = polis_client.get(f"/api/v1/jobs/{job_id}/events?once=true")
+    assert unauth_response.status_code == 401
+
+    auth_response = polis_client.get(
+        f"/api/v1/jobs/{job_id}/events",
+        params={"once": "true", "token": token},
+    )
+    assert auth_response.status_code == 200
+    assert "event: created" in auth_response.text
+
+
+def test_job_mine_filters_dashboard_sent_and_received(polis_client):
+    alice_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "alice-dashboard@example.com",
+            "password": "secret123",
+            "username": "alicedash",
+        },
+    )
+    bob_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "bob-dashboard@example.com",
+            "password": "secret123",
+            "username": "bobdash",
+        },
+    )
+    alice_token = alice_response.json()["token"]
+    bob_token = bob_response.json()["token"]
+
+    agent_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {bob_token}"},
+        json={
+            "name": "bob-worker",
+            "display_name": "Bob Worker",
+            "description": "Claims dashboard jobs",
+            "auth_method": "none",
+            "agent_card": {"version": "1.0", "skills": ["python"]},
+            "skills": ["python"],
+        },
+    )
+    bob_agent_id = agent_response.json()["id"]
+
+    alice_job = polis_client.post(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {alice_token}"},
+        json={
+            "title": "Alice job",
+            "description": "Sent by Alice",
+            "required_skill": "python",
+            "input_messages": [],
+            "attachments": [],
+        },
+    ).json()
+    bob_job = polis_client.post(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {bob_token}"},
+        json={
+            "title": "Bob job",
+            "description": "Sent by Bob",
+            "required_skill": "python",
+            "input_messages": [],
+            "attachments": [],
+        },
+    ).json()
+
+    claim_response = polis_client.post(
+        f"/api/v1/jobs/{alice_job['id']}/claim",
+        headers={"Authorization": f"Bearer {bob_token}"},
+        json={"agent_id": bob_agent_id},
+    )
+    assert claim_response.status_code == 200
+
+    sent = polis_client.get(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {alice_token}"},
+        params={"mine": "sent"},
+    ).json()
+    received = polis_client.get(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {bob_token}"},
+        params={"mine": "received"},
+    ).json()
+
+    assert [job["id"] for job in sent] == [alice_job["id"]]
+    assert [job["id"] for job in received] == [alice_job["id"]]
+    assert bob_job["id"] not in {job["id"] for job in sent + received}
+
+
+def test_agent_inbox_queries_cast_postgres_array_params(polis_client):
+    from app.routes.jobs import _build_inbox_generator
+
+    agent_id = uuid.uuid4()
+    generator = _build_inbox_generator(
+        agent_id,
+        ["python"],
+        {"python"},
+        once=True,
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        generator().__anext__().send(None)
+
+    assert any("required_skill = any(%s::text[])" in query for query in polis_client.store.queries)
+    assert not any("required_skill = any(%s)" in query for query in polis_client.store.queries)
+
+
+def test_agent_inbox_live_query_casts_seen_uuid_array(polis_client):
+    from app.routes.jobs import _build_inbox_generator
+
+    owner_id = uuid.uuid4()
+
+    def add_submitted_job(title: str) -> uuid.UUID:
+        job_id = uuid.uuid4()
+        polis_client.store.jobs[job_id] = {
+            "id": job_id,
+            "from_user_id": owner_id,
+            "to_agent_id": None,
+            "title": title,
+            "description": title,
+            "required_skill": "python",
+            "input_messages": [],
+            "attachments": [],
+            "status": "submitted",
+            "progress": None,
+            "created_at": polis_client.store.now(),
+            "claimed_at": None,
+            "started_at": None,
+            "completed_at": None,
+        }
+        return job_id
+
+    add_submitted_job("first")
+    generator = _build_inbox_generator(
+        uuid.uuid4(),
+        ["python"],
+        {"python"},
+        once=False,
+    )()
+
+    first_event = asyncio.run(generator.__anext__())
+    assert "first" in first_event
+
+    add_submitted_job("second")
+    second_event = asyncio.run(generator.__anext__())
+
+    assert "second" in second_event
+    assert any("not (id = any(%s::uuid[]))" in query for query in polis_client.store.queries)
 
 
 def test_polis_v1_alembic_migration_declares_exact_schema_contract():

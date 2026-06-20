@@ -18,7 +18,20 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
 
 
-def _agent_response(row, token: Optional[str] = None) -> AgentResponse:
+def _agent_skills(cur, agent_id: UUID) -> List[Dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT skill_id, name, description, examples, input_schema, output_schema
+        FROM agent_skills
+        WHERE agent_id = %s
+        ORDER BY skill_id ASC
+        """,
+        (str(agent_id),),
+    )
+    return [dict(row) for row in cur.fetchall()]
+
+
+def _agent_response(row, skills: Optional[List[Dict[str, Any]]] = None, token: Optional[str] = None) -> AgentResponse:
     return AgentResponse(
         id=row["id"],
         owner_id=row["owner_id"],
@@ -37,7 +50,12 @@ def _agent_response(row, token: Optional[str] = None) -> AgentResponse:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         token=token,
+        skills=skills or [],
     )
+
+
+def _agent_response_with_skills(cur, row, token: Optional[str] = None) -> AgentResponse:
+    return _agent_response(row, skills=_agent_skills(cur, row["id"]), token=token)
 
 
 def _card_skills(agent_card: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -169,7 +187,9 @@ def create_agent(
                     )
 
         token = create_access_token({"sub": str(row["id"]), "type": "agent"})
-        return _agent_response(row, token=token)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            return _agent_response_with_skills(cur, row, token=token)
 
     except HTTPException:
         raise
@@ -214,7 +234,7 @@ def list_agents(
             sql += " WHERE " + " AND ".join(wheres)
         sql += " ORDER BY created_at DESC"
         cur.execute(sql, params)
-        return [_agent_response(row) for row in cur.fetchall()]
+        return [_agent_response_with_skills(cur, row) for row in cur.fetchall()]
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
@@ -225,7 +245,7 @@ def get_agent(agent_id: UUID):
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Agent not found")
-        return _agent_response(row)
+        return _agent_response_with_skills(cur, row)
 
 
 @router.post("/{agent_id}/heartbeat", response_model=AgentResponse)
@@ -269,7 +289,7 @@ def heartbeat(
                 """,
                 (request.status, str(agent_id)),
             )
-        return _agent_response(cur.fetchone())
+        return _agent_response_with_skills(cur, cur.fetchone())
 
 
 @router.delete("/{agent_id}", response_model=dict)

@@ -200,7 +200,52 @@
           "agents"
         ],
         "summary": "List Agents",
+        "description": "List agents. Add ?mine=true (with auth) to filter to caller-owned only.\nAdd ?skill=foo to filter to agents declaring that capability.",
         "operationId": "list_agents_api_v1_agents_get",
+        "parameters": [
+          {
+            "name": "mine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Mine"
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skill"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -212,6 +257,16 @@
                     "$ref": "#/components/schemas/AgentResponse"
                   },
                   "title": "Response List Agents Api V1 Agents Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -389,6 +444,76 @@
         }
       }
     },
+    "/api/v1/agents/{agent_id}/inbox": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Stream Agent Inbox",
+        "description": "SSE stream of jobs matching this agent's skills.\n\nAuth: agent JWT or owner user JWT.\nBehaviour:\n  1. Phase 1 — Backlog: emit every currently-`submitted` job whose\n     `required_skill` is in this agent's declared skill set as\n     `event: job.available`.\n  2. Phase 2 — Live: LISTEN polis_jobs and forward every newly-created\n     matching job (also `event: job.available`).\n  3. Heartbeat every 15s (`event: heartbeat`). Stream caps at 10 minutes.\n\nPass `?once=true` to skip phase 2 (useful for HTTP smoke tests).",
+        "operationId": "stream_agent_inbox_api_v1_agents__agent_id__inbox_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "once",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Return current matches then close",
+              "default": false,
+              "title": "Once"
+            },
+            "description": "Return current matches then close"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs": {
       "post": {
         "tags": [
@@ -484,6 +609,39 @@
                 }
               ],
               "title": "Skill"
+            }
+          },
+          {
+            "name": "mine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(sent|received)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mine"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -929,6 +1087,40 @@
               "title": "Once"
             },
             "description": "Return current events then close"
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer token for EventSource clients",
+              "title": "Token"
+            },
+            "description": "Bearer token for EventSource clients"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -1089,6 +1281,14 @@
             ],
             "title": "Status",
             "default": "offline"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "Plain skill names. Stored alongside any structured skills declared in agent_card.skills."
           }
         },
         "type": "object",
@@ -1248,6 +1448,13 @@
               }
             ],
             "title": "Token"
+          },
+          "skills": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Skills"
           }
         },
         "type": "object",
@@ -1394,6 +1601,18 @@
           "metadata": {
             "type": "object",
             "title": "Metadata"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
           }
         },
         "type": "object",
@@ -1561,6 +1780,18 @@
             "type": "string",
             "minLength": 1,
             "title": "Progress"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
           }
         },
         "type": "object",

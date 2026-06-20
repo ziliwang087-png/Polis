@@ -309,6 +309,7 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     token: Optional[str] = None
+    skills: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class AttachmentInput(BaseModel):

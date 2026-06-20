@@ -14,6 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from psycopg2.extras import Json
 from starlette.responses import StreamingResponse
 
+from app.auth import decode_access_token
 from app.database import get_db_connection
 from app.dependencies import get_current_owner, get_current_user
 from app.models import (
@@ -232,6 +233,60 @@ def _agent_for_token(cur, authorization: Optional[str], request_agent_id: Option
     return dict(agent)
 
 
+def _subject_from_token_value(token: str) -> tuple[UUID, str]:
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    subject = payload.get("sub")
+    subject_type = payload.get("type", "user")
+    if subject_type == "owner":
+        subject_type = "user"
+    if not subject or subject_type not in ("user", "agent"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    return UUID(subject), subject_type
+
+
+def _subject_from_event_auth(
+    authorization: Optional[str],
+    token: Optional[str],
+) -> tuple[UUID, str]:
+    if authorization:
+        return get_current_user(authorization)
+    if token:
+        return _subject_from_token_value(token)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authorization header or token query parameter required",
+    )
+
+
+def _assert_job_event_access(cur, job_id: UUID, subject_id: UUID, subject_type: str):
+    cur.execute("SELECT * FROM jobs WHERE id = %s", (str(job_id),))
+    job = cur.fetchone()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if subject_type == "user" and job["from_user_id"] == subject_id:
+        return
+    if not job.get("to_agent_id"):
+        raise HTTPException(status_code=403, detail="You cannot read this job event stream")
+
+    cur.execute("SELECT * FROM agents WHERE id = %s", (str(job["to_agent_id"]),))
+    agent = cur.fetchone()
+    if not agent:
+        raise HTTPException(status_code=403, detail="Assigned agent not found")
+    if subject_type == "agent" and agent["id"] == subject_id:
+        return
+    if subject_type == "user" and agent["owner_id"] == subject_id:
+        return
+    raise HTTPException(status_code=403, detail="You cannot read this job event stream")
+
+
 def _assert_assigned(job_row, agent_id: UUID):
     if job_row.get("to_agent_id") != agent_id:
         raise HTTPException(
@@ -313,6 +368,8 @@ def create_job(
 def list_jobs(
     status_filter: Optional[str] = Query(None, alias="status"),
     skill: Optional[str] = Query(None),
+    mine: Optional[str] = Query(None, pattern="^(sent|received)$"),
+    authorization: Optional[str] = Header(None),
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -324,6 +381,20 @@ def list_jobs(
         if skill:
             query += " AND required_skill = %s"
             params.append(skill)
+        if mine:
+            subject_id, subject_type = get_current_user(authorization)
+            if subject_type != "user":
+                raise HTTPException(status_code=403, detail="User token required")
+            if mine == "sent":
+                query += " AND from_user_id = %s"
+                params.append(str(subject_id))
+            else:
+                cur.execute("SELECT id FROM agents WHERE owner_id = %s", (str(subject_id),))
+                agent_ids = [str(row["id"]) for row in cur.fetchall()]
+                if not agent_ids:
+                    return []
+                query += " AND to_agent_id = ANY(%s::uuid[])"
+                params.append(agent_ids)
         query += " ORDER BY created_at DESC"
         cur.execute(query, params)
         return [_job_response(cur, row) for row in cur.fetchall()]
@@ -611,7 +682,7 @@ def _build_inbox_generator(agent_id: UUID, skill_list: List[str], skills: set, o
                 """
                 SELECT * FROM jobs
                 WHERE status = 'submitted'
-                  AND required_skill = ANY(%s)
+                  AND required_skill = ANY(%s::text[])
                 ORDER BY created_at ASC
                 """,
                 (skill_list,),
@@ -630,16 +701,17 @@ def _build_inbox_generator(agent_id: UUID, skill_list: List[str], skills: set, o
         while time.monotonic() < deadline:
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT * FROM jobs
-                    WHERE status = 'submitted'
-                      AND required_skill = ANY(%s)
-                      AND id != ALL(%s)
-                    ORDER BY created_at ASC
-                    """,
-                    (skill_list, list(seen) or [""]),
-                )
+                query = """
+                SELECT * FROM jobs
+                WHERE status = 'submitted'
+                  AND required_skill = ANY(%s::text[])
+                """
+                params: List[Any] = [skill_list]
+                if seen:
+                    query += " AND NOT (id = ANY(%s::uuid[]))"
+                    params.append(list(seen))
+                query += " ORDER BY created_at ASC"
+                cur.execute(query, params)
                 fresh = cur.fetchall()
                 for row in fresh:
                     job_id = str(row["id"])
@@ -661,7 +733,14 @@ def _build_inbox_generator(agent_id: UUID, skill_list: List[str], skills: set, o
 async def stream_job_events(
     job_id: UUID,
     once: bool = Query(False, description="Return current events then close"),
+    token: Optional[str] = Query(None, description="Bearer token for EventSource clients"),
+    authorization: Optional[str] = Header(None),
 ):
+    subject_id, subject_type = _subject_from_event_auth(authorization, token)
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        _assert_job_event_access(cur, job_id, subject_id, subject_type)
+
     async def event_generator():
         seen = set()
         deadline = time.monotonic() + 30

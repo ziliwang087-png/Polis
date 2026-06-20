@@ -11,6 +11,12 @@
  *   POST /api/v1/jobs/:id/cancel
  *   POST /api/v1/jobs/:id/rate
  *   GET  /api/v1/jobs/:id/events  (text/event-stream)
+ *
+ * 兼容层注解：
+ *   - 后端 GET /jobs/:id 把 artifacts/events/rating 平铺在 job 顶层，前端把它
+ *     重组成 JobDetail 嵌套结构。
+ *   - 后端 JobResponse 只返回 from_user_id / to_agent_id（UUID），不 join；
+ *     前端的 from_user/to_agent 字段始终是 undefined，UI 用 UUID 前 8 位兜底。
  */
 import { apiClient, API_BASE_URL } from './client';
 import type {
@@ -22,14 +28,19 @@ import type {
   JobStatus,
 } from './types';
 
+export interface JobListParams {
+  status?: JobStatus;
+  skill?: string;
+  /** 后端过滤：sent = 我发的；received = 我的 agents 抢到的 */
+  mine?: 'sent' | 'received';
+}
+
 export const jobsApi = {
-  list: async (
-    params: { status?: JobStatus; skill?: string; mine?: 'sent' | 'received' } = {},
-  ) => {
+  list: async (params: JobListParams = {}) => {
     const { data } = await apiClient.get<Job[]>('/jobs', { params });
     return data;
   },
-  get: async (id: string) => {
+  get: async (id: string): Promise<JobDetail> => {
     const { data } = await apiClient.get<Record<string, unknown>>(`/jobs/${id}`);
     // 后端 GET /jobs/:id 把 artifacts/events/rating 平铺在 job 顶层，
     // 前端期望嵌套结构，这里重组一次
@@ -53,11 +64,11 @@ export const jobsApi = {
     id: string,
     payload: { type: JobArtifact['type']; content?: string; file_url?: string },
   ) => {
-    const { data } = await apiClient.post<JobArtifact>(`/jobs/${id}/artifacts`, payload);
+    const { data } = await apiClient.post<Job>(`/jobs/${id}/artifacts`, payload);
     return data;
   },
   reportProgress: async (id: string, progress: string) => {
-    const { data } = await apiClient.post<{ ok: true }>(`/jobs/${id}/progress`, {
+    const { data } = await apiClient.post<Job>(`/jobs/${id}/progress`, {
       progress,
     });
     return data;
@@ -74,7 +85,8 @@ export const jobsApi = {
 
 /**
  * SSE 事件流 URL —— 由 EventSource 使用。
- * EventSource 不支持自定义 header，所以鉴权 token 走 query string，由后端验证。
+ *
+ * EventSource 不支持自定义 header，所以鉴权 token 走 query string。
  */
 export function jobEventsURL(jobId: string, token: string | null) {
   const url = `${API_BASE_URL}/jobs/${jobId}/events`;

@@ -2,6 +2,11 @@
  * JobCard —— 任务卡片（用于广场和 dashboard）。
  *
  * 没有任何社交功能（点赞 / 收藏 / 评论），只展示任务关键信息 + 状态。
+ *
+ * 名字解析：
+ * - 后端 GET /jobs 不 join users/agents，只返回 UUID。
+ * - 调用方传入 `agentNameMap`（agent_id → display name）和可选 `fromUserName`。
+ * - 解析失败时退化成 UUID 前 8 位 + 友好前缀。
  */
 'use client';
 
@@ -10,8 +15,31 @@ import type { Job } from '@/lib/api/types';
 import { JOB_STATUS_META, relativeTime } from '@/lib/format';
 import { ClockIcon, UsersIcon, BotIcon, BriefcaseIcon } from './icons/Icon';
 
-export default function JobCard({ job }: { job: Job }) {
+type Props = {
+  job: Job;
+  /** agent_id → display 名 的映射，没匹配上时退化为短 UUID */
+  agentNameMap?: Map<string, string>;
+  /** 调用方知道发起人的友好名（例如在 /me 页发起人就是当前用户） */
+  fromUserName?: string;
+};
+
+function shortId(id: string | null | undefined) {
+  return (id ?? '').slice(0, 8);
+}
+
+export default function JobCard({ job, agentNameMap, fromUserName }: Props) {
   const statusMeta = JOB_STATUS_META[job.status];
+  const fromLabel =
+    fromUserName ||
+    job.from_user?.display_name ||
+    job.from_user?.username ||
+    `user ${shortId(job.from_user_id)}`;
+  const agentDisplay = job.to_agent_id
+    ? agentNameMap?.get(job.to_agent_id) ||
+      job.to_agent?.display_name ||
+      job.to_agent?.name ||
+      `agent ${shortId(job.to_agent_id)}`
+    : null;
 
   return (
     <Link
@@ -23,9 +51,7 @@ export default function JobCard({ job }: { job: Job }) {
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <BriefcaseIcon size={15} strokeWidth={1.8} className="text-gray-400" />
-          <span className="font-medium text-gray-700">
-            {job.from_user?.display_name || job.from_user?.username || job.from_user_id.slice(0, 8)}
-          </span>
+          <span className="font-medium text-gray-700">{fromLabel}</span>
         </div>
         <span
           className="px-3 py-1 rounded-full text-xs font-semibold"
@@ -59,10 +85,10 @@ export default function JobCard({ job }: { job: Job }) {
           <ClockIcon size={13} strokeWidth={1.8} />
           {relativeTime(job.created_at)}
         </span>
-        {job.to_agent ? (
+        {agentDisplay ? (
           <span className="flex items-center gap-1.5 text-gray-700">
             <BotIcon size={13} strokeWidth={1.8} />
-            {job.to_agent.display_name || job.to_agent.name}
+            {agentDisplay}
           </span>
         ) : (
           <span className="flex items-center gap-1.5">

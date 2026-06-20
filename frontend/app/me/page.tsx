@@ -16,7 +16,7 @@ import { authApi } from '@/lib/api/auth';
 import { useAuthStore } from '@/lib/store';
 import Loading from '@/components/Loading';
 import JobCard from '@/components/JobCard';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { GemIcon, BotIcon, BriefcaseIcon, StarIcon } from '@/components/icons/Icon';
 
 export default function MePage() {
@@ -32,19 +32,28 @@ export default function MePage() {
     if (profile.data) setUser(profile.data);
   }, [profile.data, setUser]);
 
-  const sentJobs = useQuery({
-    queryKey: ['jobs', 'mine', 'sent'],
-    queryFn: () => jobsApi.list({ mine: 'sent' }),
-    enabled: isAuthenticated(),
-  });
-  const receivedJobs = useQuery({
-    queryKey: ['jobs', 'mine', 'received'],
-    queryFn: () => jobsApi.list({ mine: 'received' }),
-    enabled: isAuthenticated(),
-  });
   const myAgents = useQuery({
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
+    enabled: isAuthenticated(),
+  });
+
+  const myAgentIdSet = useMemo(
+    () => new Set((myAgents.data ?? []).map((a) => a.id)),
+    [myAgents.data],
+  );
+  const agentNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    (myAgents.data ?? []).forEach((a) => m.set(a.id, a.display_name || a.name));
+    return m;
+  }, [myAgents.data]);
+
+  /* 后端 GET /jobs 还没实现 mine=sent/received 过滤，前端拉全量后本地过滤。
+   * 当后端将来加上时，把 jobsApi.list() 改成 list({mine:'sent', userId})
+   * 即可平滑切换。 */
+  const allJobs = useQuery({
+    queryKey: ['jobs', 'all'],
+    queryFn: () => jobsApi.list(),
     enabled: isAuthenticated(),
   });
 
@@ -61,8 +70,10 @@ export default function MePage() {
     );
   }
 
-  const sent = sentJobs.data ?? [];
-  const received = receivedJobs.data ?? [];
+  const sent = (allJobs.data ?? []).filter((j) => j.from_user_id === user.id);
+  const received = (allJobs.data ?? []).filter(
+    (j) => j.to_agent_id && myAgentIdSet.has(j.to_agent_id),
+  );
   const agents = myAgents.data ?? [];
 
   return (
@@ -123,8 +134,10 @@ export default function MePage() {
             </Link>
           </span>
         }
-        loading={sentJobs.isLoading}
+        loading={allJobs.isLoading}
         items={sent}
+        agentNameMap={agentNameMap}
+        currentUserName={user.display_name || user.username}
       />
 
       {/* 我接的任务 */}
@@ -138,8 +151,9 @@ export default function MePage() {
             </Link>
           </span>
         }
-        loading={receivedJobs.isLoading}
+        loading={allJobs.isLoading || myAgents.isLoading}
         items={received}
+        agentNameMap={agentNameMap}
       />
     </div>
   );
@@ -170,11 +184,15 @@ function Section({
   empty,
   loading,
   items,
+  agentNameMap,
+  currentUserName,
 }: {
   title: string;
   empty: React.ReactNode;
   loading: boolean;
-  items: Array<import('@/lib/api/types').Job>;
+  items: import('@/lib/api/types').Job[];
+  agentNameMap: Map<string, string>;
+  currentUserName?: string;
 }) {
   return (
     <section>
@@ -186,7 +204,12 @@ function Section({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {items.map((j) => (
-            <JobCard key={j.id} job={j} />
+            <JobCard
+              key={j.id}
+              job={j}
+              agentNameMap={agentNameMap}
+              fromUserName={currentUserName}
+            />
           ))}
         </div>
       )}

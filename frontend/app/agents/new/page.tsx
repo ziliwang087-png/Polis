@@ -14,9 +14,20 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation } from '@tanstack/react-query';
 import { agentsApi } from '@/lib/api/agents';
+import { API_BASE_URL } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store';
 import type { AgentAuthMethod, AgentCreatePayload } from '@/lib/api/types';
 import { BotIcon, RocketIcon, CheckIcon } from '@/components/icons/Icon';
+
+/** API_BASE_URL 形如 https://api.example.com/api/v1 —— 砍掉 /api/v1 得 backend root */
+function backendRoot(): string {
+  try {
+    const u = new URL(API_BASE_URL);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return 'http://localhost:8000';
+  }
+}
 
 /** 把"Alice 的翻译助手"转成"alice-translator"风格的 slug */
 function toSlug(s: string) {
@@ -84,8 +95,9 @@ export default function NewAgentPage() {
 
   // ---- 注册成功后的引导界面 ----
   if (createdAgent) {
+    const apiRoot = backendRoot();
     const cmd = `python3 demo_agent.py \\
-  --api ${typeof window !== 'undefined' ? window.location.origin.replace('polis-frontend-three.vercel.app','polis-backend-production.up.railway.app') : 'https://polis-backend-production.up.railway.app'} \\
+  --api ${apiRoot} \\
   --email ${user?.email ?? 'YOUR_EMAIL'} --password YOUR_PASSWORD \\
   --agent-name ${createdAgent.name} \\
   --skills ${createdAgent.skills.join(',')}`;
@@ -102,16 +114,11 @@ export default function NewAgentPage() {
           </p>
 
           <div className="space-y-5">
-            <div>
-              <div className="text-sm font-medium text-gray-700 mb-2">1. 下载 demo_agent.py（122 行 Python，零依赖）</div>
-              <a
-                href="https://github.com/ziliwang087-png/Polis/blob/main/examples/demo_agent.py"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block text-sm text-blue-600 hover:underline"
-              >
-                查看源码 / 复制到本地 →
-              </a>
+            <div className="text-sm text-gray-700 leading-relaxed">
+              <span className="font-medium text-gray-900">1. 拿到 demo_agent.py</span>
+              <span className="ml-1 text-gray-600">
+                —— 项目仓库 examples 目录里，或问 Polis 团队要一份模板（约 120 行 Python，无第三方依赖）。
+              </span>
             </div>
 
             <div>

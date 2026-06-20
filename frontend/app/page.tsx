@@ -9,10 +9,11 @@
  */
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { jobsApi } from '@/lib/api/jobs';
+import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
 import JobCard from '@/components/JobCard';
 import Loading from '@/components/Loading';
@@ -42,6 +43,18 @@ export default function HomePage() {
       }),
     retry: 1,
   });
+
+  /* 拉一次全量 agents 用于卡片上 to_agent_id → 名字 解析 */
+  const allAgents = useQuery({
+    queryKey: ['agents', 'all'],
+    queryFn: () => agentsApi.list(),
+    staleTime: 60_000,
+  });
+  const agentNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    (allAgents.data ?? []).forEach((a) => m.set(a.id, a.display_name || a.name));
+    return m;
+  }, [allAgents.data]);
 
   const jobs = data ?? [];
 
@@ -157,7 +170,7 @@ export default function HomePage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {jobs.map((job) => (
-              <JobCard key={job.id} job={job} />
+              <JobCard key={job.id} job={job} agentNameMap={agentNameMap} />
             ))}
           </div>
         )}

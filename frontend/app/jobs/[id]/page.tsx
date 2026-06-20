@@ -61,6 +61,17 @@ export default function JobDetailPage({
     enabled: isAuthenticated(),
   });
 
+  /* 后端 GET /jobs/:id 不 join agents；按需拉一次 to_agent 解析名字。
+   * 如果当前用户是 agent 的 owner，myAgents 里已经有了，跳过拉取。 */
+  const toAgentId = (detail.data?.job.to_agent_id as string | null | undefined) ?? null;
+  const ownsClaimingAgent = !!(myAgents.data ?? []).find((a) => a.id === toAgentId);
+  const claimingAgentQuery = useQuery({
+    queryKey: ['agent', toAgentId],
+    queryFn: () => agentsApi.get(toAgentId!),
+    enabled: !!toAgentId && !ownsClaimingAgent,
+    staleTime: 60_000,
+  });
+
   /* ---------- SSE 订阅 ---------- */
   useEffect(() => {
     if (!id) return;
@@ -74,7 +85,7 @@ export default function JobDetailPage({
       (type) => es.addEventListener(type, refresh),
     );
     es.onerror = () => {
-      // 静默 —— EventSource 会自动重连
+      // 静默 —— EventSource 会自动重连。后端 SSE 30s 后主动关连接，这是正常行为。
     };
     return () => es.close();
   }, [id, token, queryClient]);
@@ -130,6 +141,19 @@ export default function JobDetailPage({
     return skills.some((s) => s.skill_id === job.required_skill);
   });
 
+  // 抢单 agent 的友好名字：优先用我自己的 agent，否则用单独拉取的，否则 UUID 短显示
+  const claimedAgentLabel = job.to_agent_id
+    ? claimingAgent?.display_name ||
+      claimingAgent?.name ||
+      claimingAgentQuery.data?.display_name ||
+      claimingAgentQuery.data?.name ||
+      `agent ${job.to_agent_id.slice(0, 8)}`
+    : null;
+  const fromUserLabel =
+    isOwner
+      ? `${user?.display_name || user?.username || '我'}（我）`
+      : `user ${(job.from_user_id || '').slice(0, 8)}`;
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -152,11 +176,7 @@ export default function JobDetailPage({
             <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 mb-5">
               <span>
                 发起人：
-                <span className="text-gray-700 font-medium">
-                  {job.from_user?.display_name ||
-                    job.from_user?.username ||
-                    job.from_user_id.slice(0, 8)}
-                </span>
+                <span className="text-gray-700 font-medium">{fromUserLabel}</span>
               </span>
               <span>·</span>
               <span>{formatDateTime(job.created_at)}</span>
@@ -306,18 +326,15 @@ export default function JobDetailPage({
             )}
           </div>
 
-          {job.to_agent && (
+          {claimedAgentLabel && (
             <div className="bg-white rounded-3xl p-6 shadow-sm">
               <h2 className="text-base font-bold text-gray-900 mb-3 flex items-center gap-1.5">
                 <BotIcon size={16} strokeWidth={2} />
                 抢单 Agent
               </h2>
-              <Link
-                href={`/agents/${job.to_agent.id}`}
-                className="block text-sm font-medium text-blue-600 hover:underline"
-              >
-                {job.to_agent.display_name || job.to_agent.name}
-              </Link>
+              <div className="text-sm font-medium text-gray-800">
+                {claimedAgentLabel}
+              </div>
               <div className="text-xs text-gray-500 mt-1">
                 抢单时间：{formatDateTime(job.claimed_at)}
               </div>

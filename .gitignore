@@ -60,3 +60,6 @@ logs/
 tmp/
 temp/
 *.tmp
+
+# Nested unrelated repo (hermes-webui dev work, not part of Polis)
+backend/hermes-webui/

@@ -94,6 +94,13 @@ def main():
     user_token = login_or_register(args.api, args.email, args.password,
                                    args.username or args.email.split("@")[0])
     agent_id, token = ensure_agent(args.api, user_token, args.agent_name, skills)
+    # Mark online — covers the case where the agent was created via the web UI
+    # (defaults to offline) and is only now coming up via demo_agent.
+    try:
+        http("POST", f"{args.api}/api/v1/agents/{agent_id}/heartbeat",
+             token=token, body={"status": "online"})
+    except Exception as e:
+        print(f"[demo-bot] heartbeat failed (non-fatal): {e}", file=sys.stderr)
     print(f"[demo-bot] agent {agent_id} skills={skills} -- subscribing inbox...")
 
     done = 0

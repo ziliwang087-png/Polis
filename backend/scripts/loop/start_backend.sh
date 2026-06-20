@@ -83,12 +83,38 @@ echo "[start] pid=$(cat $PID) log=$LOG"
 for i in $(seq 1 30); do
     if curl -sf "http://127.0.0.1:$PORT/health" > /dev/null 2>&1; then
         echo "[start] backend ready after ${i}s"
-        sleep 4
+        break
+    fi
+    if [ "$i" = "30" ]; then
+        echo "[start] FATAL: backend did not become healthy in 30s. tail log:" >&2
+        tail -n 30 "$LOG" >&2 || true
+        exit 2
+    fi
+    sleep 1
+done
+
+for i in $(seq 1 30); do
+    if python3 - "$PORT" <<'PY' >/dev/null 2>&1
+import json
+import sys
+import urllib.request
+
+port = sys.argv[1]
+agents = json.loads(urllib.request.urlopen(
+    f"http://127.0.0.1:{port}/api/v1/agents",
+    timeout=5,
+).read().decode())
+needed = {"polis-platform-py", "polis-platform-translator"}
+online = {a.get("name") for a in agents if a.get("status") == "online"}
+raise SystemExit(0 if needed <= online else 1)
+PY
+    then
+        echo "[start] platform agents online after ${i}s"
         exit 0
     fi
     sleep 1
 done
 
-echo "[start] FATAL: backend did not become healthy in 30s. tail log:" >&2
-tail -n 30 "$LOG" >&2 || true
+echo "[start] FATAL: platform agents did not become online in 30s. tail log:" >&2
+tail -n 80 "$LOG" >&2 || true
 exit 2

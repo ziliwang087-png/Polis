@@ -12,7 +12,7 @@ Polis 内置平台 Agent
     POLIS_PLATFORM_AGENT_LLM_BASE  OpenAI 兼容 base URL，例如 https://chat.aiprox.net/v1
     POLIS_PLATFORM_AGENT_LLM_KEY   API key
     POLIS_PLATFORM_AGENT_LLM_MODEL 默认 gpt-4o-mini
-    POLIS_PLATFORM_AGENT_SKILLS    逗号分隔，默认 "python,translate,write,review"
+    POLIS_PLATFORM_AGENT_SKILLS    逗号分隔，默认 "python,write,review"
 """
 from __future__ import annotations
 
@@ -25,10 +25,14 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from psycopg2.extras import Json
+
+from app.database import get_db_connection
+
 logger = logging.getLogger("polis.platform_agent")
 
-DEFAULT_SKILLS = ["python", "translate", "write", "review"]
-SYSTEM_PROMPT = """你是 Polis 任务网络上的一个 AI agent。
+DEFAULT_SKILLS = ["python", "write", "review"]
+DEFAULT_PLATFORM_PROMPT = """你是 Polis 任务网络上的一个 AI agent。
 用户发任务给你，你按要求干活，直接返回结果。
 
 规则：
@@ -36,6 +40,15 @@ SYSTEM_PROMPT = """你是 Polis 任务网络上的一个 AI agent。
 - 任务要代码就只返回代码块（用 ``` 包），任务要翻译就只返回译文
 - 看不懂任务就说"任务描述不清晰，请补充：……"
 - 任务跟你能力无关（比如要你订机票），返回"这个任务超出 agent 能力范围"
+"""
+TRANSLATOR_PROMPT = """你是 Polis 任务网络上的专业翻译 agent。
+只处理翻译任务，把用户给出的文本翻译成目标语言。
+
+规则：
+- 只输出译文，不要解释、不要寒暄、不要加标题
+- 如果目标语言没说清楚，默认翻译成英文
+- 保留数字、专有名词和技术术语的准确含义
+- 不要输出原文，除非原文中的专有名词本来就该保留
 """
 
 REQUEST_TIMEOUT = 60
@@ -70,21 +83,94 @@ def _login_or_register(api, email, password, username):
     })["token"]
 
 
-def _ensure_agent(api, user_token, name, skills):
+def _builtin_agents() -> List[Dict[str, Any]]:
+    platform_skills_raw = os.getenv("POLIS_PLATFORM_AGENT_SKILLS", ",".join(DEFAULT_SKILLS))
+    platform_skills = [s.strip() for s in platform_skills_raw.split(",") if s.strip()]
+    return [
+        {
+            "name": os.getenv("POLIS_PLATFORM_AGENT_NAME", "polis-platform-py"),
+            "display_name": "Polis 官方 AI Agent",
+            "description": "平台内置 agent，可写代码 / 改文 / review。任务发到这就行，几秒回。",
+            "skills": platform_skills,
+            "system_prompt": DEFAULT_PLATFORM_PROMPT,
+        },
+        {
+            "name": "polis-platform-translator",
+            "display_name": "Polis 官方翻译 Agent",
+            "description": "平台内置翻译 agent，专门处理 translate 技能任务。",
+            "skills": ["translate"],
+            "system_prompt": TRANSLATOR_PROMPT,
+        },
+    ]
+
+
+def _sync_agent_record(agent_id: str, spec: Dict[str, Any]):
+    skills = spec["skills"]
+    agent_card = {
+        "version": "1.0",
+        "name": spec["name"],
+        "description": spec["description"],
+        "skills": skills,
+    }
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE agents
+            SET display_name = %s,
+                description = %s,
+                agent_card = %s,
+                status = 'online',
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (spec["display_name"], spec["description"], Json(agent_card), agent_id),
+        )
+        cur.execute(
+            "DELETE FROM agent_skills WHERE agent_id = %s AND NOT (skill_id = ANY(%s::text[]))",
+            (agent_id, skills),
+        )
+        for skill in skills:
+            cur.execute(
+                """
+                INSERT INTO agent_skills (
+                    agent_id, skill_id, name, description, examples,
+                    input_schema, output_schema
+                )
+                VALUES (%s, %s, %s, NULL, NULL, NULL, NULL)
+                ON CONFLICT (agent_id, skill_id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    description = EXCLUDED.description,
+                    examples = EXCLUDED.examples,
+                    input_schema = EXCLUDED.input_schema,
+                    output_schema = EXCLUDED.output_schema
+                """,
+                (agent_id, skill, skill),
+            )
+
+
+def _ensure_agent(api, user_token, spec):
     existing = _http("GET", f"{api}/api/v1/agents?mine=true", token=user_token) or []
     for a in existing:
-        if a["name"] == name:
+        if a["name"] == spec["name"]:
+            _sync_agent_record(a["id"], spec)
             return a["id"]
     payload = {
-        "name": name,
-        "display_name": "Polis 官方 AI Agent",
-        "description": "平台内置 agent，可写代码 / 翻译 / 改文。任务发到这就行，几秒回。",
+        "name": spec["name"],
+        "display_name": spec["display_name"],
+        "description": spec["description"],
         "auth_method": "none",
-        "skills": skills,
-        "agent_card": {"version": "1.0", "skills": skills},
+        "skills": spec["skills"],
+        "agent_card": {
+            "version": "1.0",
+            "name": spec["name"],
+            "description": spec["description"],
+            "skills": spec["skills"],
+        },
         "status": "online",
     }
     a = _http("POST", f"{api}/api/v1/agents", token=user_token, body=payload)
+    _sync_agent_record(a["id"], spec)
     return a["id"]
 
 
@@ -96,12 +182,12 @@ def _heartbeat(api, agent_id, token):
         logger.warning("heartbeat failed: %s", e)
 
 
-def _call_llm(base_url, api_key, model, user_text):
+def _call_llm(base_url, api_key, model, system_prompt, user_text):
     url = base_url.rstrip("/") + "/chat/completions"
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text[:MAX_DESC_CHARS]},
         ],
         "temperature": 0.4,
@@ -128,7 +214,7 @@ def _parse_sse(stream):
             data_lines.append(line[5:].lstrip())
 
 
-def _work_one(api, agent_id, token, job, llm_cfg):
+def _work_one(api, agent_id, token, agent_spec, job, llm_cfg):
     job_id = job["id"]
     title = job.get("title") or "(untitled)"
     skill = job.get("required_skill")
@@ -152,7 +238,13 @@ def _work_one(api, agent_id, token, job, llm_cfg):
 
     try:
         prompt = f"任务标题：{title}\n必需技能：{skill}\n\n任务描述：\n{desc}"
-        result = _call_llm(llm_cfg["base"], llm_cfg["key"], llm_cfg["model"], prompt)
+        result = _call_llm(
+            llm_cfg["base"],
+            llm_cfg["key"],
+            llm_cfg["model"],
+            agent_spec["system_prompt"],
+            prompt,
+        )
     except Exception as e:
         logger.exception("[platform-agent] LLM call failed: %s", e)
         result = f"[platform-agent] 调用 LLM 失败：{type(e).__name__}: {e}"
@@ -162,27 +254,32 @@ def _work_one(api, agent_id, token, job, llm_cfg):
               "agent_id": agent_id,
               "type": "text",
               "content": result,
-              "metadata": {"by": "polis-platform-py", "model": llm_cfg["model"]},
+              "metadata": {"by": agent_spec["name"], "model": llm_cfg["model"]},
           })
     logger.info("[platform-agent] delivered job=%s len=%s", job_id, len(result))
 
 
-def _worker_loop(api, agent_id, token, llm_cfg):
+def _worker_loop(api, agent_id, token, agent_spec, llm_cfg):
     while True:
         try:
             stream = _http("GET", f"{api}/api/v1/agents/{agent_id}/inbox",
                            token=token, stream=True, timeout=INBOX_TIMEOUT)
-            logger.info("[platform-agent] inbox connected")
+            logger.info("[platform-agent] inbox connected name=%s", agent_spec["name"])
             for event, payload in _parse_sse(stream):
                 if event != "job.available":
                     continue
                 try:
                     job = json.loads(payload)
-                    _work_one(api, agent_id, token, job, llm_cfg)
+                    _work_one(api, agent_id, token, agent_spec, job, llm_cfg)
                 except Exception as e:
                     logger.exception("[platform-agent] work failed: %s", e)
         except Exception as e:
-            logger.warning("[platform-agent] inbox dropped: %s -- reconnect in %ds", e, RECONNECT_DELAY)
+            logger.warning(
+                "[platform-agent] inbox dropped name=%s: %s -- reconnect in %ds",
+                agent_spec["name"],
+                e,
+                RECONNECT_DELAY,
+            )
             time.sleep(RECONNECT_DELAY)
 
 
@@ -196,9 +293,6 @@ def maybe_start_platform_agent():
     llm_base = os.getenv("POLIS_PLATFORM_AGENT_LLM_BASE")
     llm_key = os.getenv("POLIS_PLATFORM_AGENT_LLM_KEY")
     llm_model = os.getenv("POLIS_PLATFORM_AGENT_LLM_MODEL", "gpt-4o-mini")
-    skills_raw = os.getenv("POLIS_PLATFORM_AGENT_SKILLS", ",".join(DEFAULT_SKILLS))
-    skills = [s.strip() for s in skills_raw.split(",") if s.strip()]
-
     missing = [k for k, v in {
         "POLIS_PLATFORM_AGENT_USER_EMAIL": email,
         "POLIS_PLATFORM_AGENT_USER_PASSWORD": password,
@@ -210,19 +304,30 @@ def maybe_start_platform_agent():
         return
 
     api = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-    agent_name = os.getenv("POLIS_PLATFORM_AGENT_NAME", "polis-platform-py")
     username = os.getenv("POLIS_PLATFORM_AGENT_USERNAME", "polis_platform")
     llm_cfg = {"base": llm_base, "key": llm_key, "model": llm_model}
+    agent_specs = _builtin_agents()
 
     def _bootstrap():
         time.sleep(3)
         try:
             user_token = _login_or_register(api, email, password, username)
-            agent_id = _ensure_agent(api, user_token, agent_name, skills)
-            _heartbeat(api, agent_id, user_token)
-            logger.info("[platform-agent] live as agent_id=%s skills=%s model=%s",
-                        agent_id, skills, llm_model)
-            _worker_loop(api, agent_id, user_token, llm_cfg)
+            for spec in agent_specs:
+                agent_id = _ensure_agent(api, user_token, spec)
+                _heartbeat(api, agent_id, user_token)
+                logger.info(
+                    "[platform-agent] live name=%s agent_id=%s skills=%s model=%s",
+                    spec["name"],
+                    agent_id,
+                    spec["skills"],
+                    llm_model,
+                )
+                threading.Thread(
+                    target=_worker_loop,
+                    args=(api, agent_id, user_token, spec, llm_cfg),
+                    name=f"polis-platform-agent-{spec['name']}",
+                    daemon=True,
+                ).start()
         except Exception as e:
             logger.exception("[platform-agent] bootstrap failed, giving up: %s", e)
 

@@ -49,8 +49,8 @@ export default function JobCard({ job }: { job: Job }) {
         >
           #{job.required_skill}
         </span>
-        {job.attachments.length > 0 && (
-          <span className="text-gray-500">{job.attachments.length} 个附件</span>
+        {(job.attachments?.length ?? 0) > 0 && (
+          <span className="text-gray-500">{job.attachments?.length ?? 0} 个附件</span>
         )}
       </div>
 

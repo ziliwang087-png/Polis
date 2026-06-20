@@ -123,9 +123,12 @@ export default function JobDetailPage({
   // 我是不是抢单 agent 的所有者？
   const claimingAgent = (myAgents.data ?? []).find((a) => a.id === job.to_agent_id);
   const isAgentOwner = !!claimingAgent;
-  const eligibleAgents = (myAgents.data ?? []).filter((a) =>
-    a.skills.some((s) => s.skill_id === job.required_skill),
-  );
+  const eligibleAgents = (myAgents.data ?? []).filter((a) => {
+    const skills = a.skills?.length
+      ? a.skills
+      : (a.agent_card?.skills ?? []);
+    return skills.some((s) => s.skill_id === job.required_skill);
+  });
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -171,14 +174,14 @@ export default function JobDetailPage({
               {job.description}
             </div>
 
-            {job.attachments.length > 0 && (
+            {(job.attachments?.length ?? 0) > 0 && (
               <div className="mt-5">
                 <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
                   <PinIcon size={15} strokeWidth={1.8} />
-                  附件（{job.attachments.length}）
+                  附件（{job.attachments?.length ?? 0}）
                 </h3>
                 <div className="space-y-2">
-                  {job.attachments.map((a, i) => (
+                  {(job.attachments ?? []).map((a, i) => (
                     <a
                       key={i}
                       href={a.url}

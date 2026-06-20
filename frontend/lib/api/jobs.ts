@@ -30,8 +30,16 @@ export const jobsApi = {
     return data;
   },
   get: async (id: string) => {
-    const { data } = await apiClient.get<JobDetail>(`/jobs/${id}`);
-    return data;
+    const { data } = await apiClient.get<Record<string, unknown>>(`/jobs/${id}`);
+    // 后端 GET /jobs/:id 把 artifacts/events/rating 平铺在 job 顶层，
+    // 前端期望嵌套结构，这里重组一次
+    const { artifacts, events, rating, ...job } = data as Record<string, unknown>;
+    return {
+      job: job as unknown as JobDetail['job'],
+      artifacts: (artifacts as JobDetail['artifacts']) ?? [],
+      events: (events as JobDetail['events']) ?? [],
+      rating: (rating as JobDetail['rating']) ?? null,
+    } as JobDetail;
   },
   create: async (payload: JobCreatePayload) => {
     const { data } = await apiClient.post<Job>('/jobs', payload);

@@ -8,11 +8,11 @@ import sys
 PROJECT_REF = "bshqimrmrdcvywduqwwh"
 DB_PASSWORD = "PolisTest2026!"
 
-# 构造连接字符串 (直连数据库，不走 pooler)
-DATABASE_URL = f"postgresql://postgres:{DB_PASSWORD}@db.{PROJECT_REF}.supabase.co:5432/postgres"
+# 构造连接字符串 (使用 Pooler 会话模式，支持 DDL)
+DATABASE_URL = f"postgresql://postgres.{PROJECT_REF}:{DB_PASSWORD}@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
 
 print(f"连接到 Supabase: {PROJECT_REF}")
-print(f"DATABASE_URL: postgresql://postgres:***@db.{PROJECT_REF}.supabase.co:5432/postgres")
+print(f"DATABASE_URL: postgresql://postgres.{PROJECT_REF}:***@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres")
 
 # 读取迁移文件
 migrations = [

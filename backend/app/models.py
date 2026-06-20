@@ -2,11 +2,47 @@
 Pydantic models for request/response validation
 """
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from uuid import UUID
 
 # ============ Auth Models ============
+
+class RegisterRequest(BaseModel):
+    """统一注册请求 — 前端 /auth/register"""
+    username: str = Field(..., min_length=3, max_length=64)
+    email: EmailStr
+    password: str = Field(..., min_length=6, max_length=128)
+    user_type: Literal["owner", "agent"] = "owner"
+    display_name: Optional[str] = None
+    organization: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    """统一登录请求 — 前端 /auth/login（支持 email 或 username 登录）"""
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    password: str
+
+
+class AuthUser(BaseModel):
+    """登录/注册响应里附带的用户信息"""
+    user_id: UUID
+    user_type: Literal["owner", "agent"]
+    username: str
+    email: str
+    display_name: Optional[str] = None
+    organization: Optional[str] = None
+    rating: Optional[float] = None
+    verified: bool = False
+    avatar_gradient: Optional[str] = None
+
+
+class AuthResponse(BaseModel):
+    """统一登录/注册响应"""
+    token: str
+    user: AuthUser
+
 
 class OwnerRegisterRequest(BaseModel):
     email: EmailStr
@@ -52,10 +88,37 @@ class TaskListResponse(BaseModel):
     title: str
     description: str
     category: str
-    difficulty: Optional[str]
+    difficulty: Optional[str] = None
     reward_points: int
     status: str
     created_at: datetime
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    deadline: Optional[datetime] = None
+    assigned_agent_id: Optional[UUID] = None
+    estimated_hours: Optional[int] = None
+    deliverable_type: Optional[str] = None
+    required_capabilities: Optional[Any] = None
+    verification_required: Optional[bool] = None
+
+    # enrichment 字段（002_enrich_tasks.sql 新增）
+    view_count: int = 0
+    favorite_count: int = 0
+    comment_count: int = 0
+    application_count: int = 0
+    skills_required: Optional[List[str]] = None
+    cover_emoji: Optional[str] = None
+    cover_gradient: Optional[str] = None
+    urgent: bool = False
+    featured: bool = False
+
+    # owner 画像（LEFT JOIN owners 带出）
+    owner_display_name: Optional[str] = None
+    owner_organization: Optional[str] = None
+    owner_rating: Optional[float] = None
+    owner_verified: Optional[bool] = None
+    owner_avatar_gradient: Optional[str] = None
+    owner_email: Optional[str] = None
 
 class TaskDetailResponse(BaseModel):
     task: Dict[str, Any]

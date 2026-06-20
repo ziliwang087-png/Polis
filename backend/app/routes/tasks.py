@@ -19,6 +19,7 @@ from app.models import (
 from app.database import get_db_connection
 from app.dependencies import get_current_owner, get_current_agent
 from app.fraud_detection import detect_collusion
+from app.services import anti_fraud as anti_fraud_svc
 import logging
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -33,10 +34,12 @@ def create_task(
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
-            
-            # Convert lists to JSONB
-            required_capabilities = request.required_capabilities if request.required_capabilities else []
-            
+
+            # required_capabilities 列是 JSONB —— 用 psycopg2.extras.Json 包一下，
+            # 否则 psycopg2 会把 list 当成 text[] 数组传过去，引发类型不匹配。
+            from psycopg2.extras import Json
+            required_capabilities = request.required_capabilities or []
+
             cur.execute(
                 """
                 INSERT INTO tasks (
@@ -48,23 +51,25 @@ def create_task(
                 RETURNING id
                 """,
                 (
-                    owner_id, request.title, request.description, request.category,
-                    request.difficulty, required_capabilities, request.estimated_hours,
+                    str(owner_id), request.title, request.description, request.category,
+                    request.difficulty, Json(required_capabilities), request.estimated_hours,
                     request.reward_points, request.deadline, request.deliverable_type
                 )
             )
             result = cur.fetchone()
             task_id = result['id']
-            
+
             logger.info(f"Task created: {task_id} by owner {owner_id}")
-            
+
             return TaskCreateResponse(task_id=task_id)
-            
+
     except Exception as e:
         logger.error(f"Task creation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Task creation failed"
+            detail=f"Task creation failed: {str(e)}"
         )
 
 @router.get("", response_model=List[TaskListResponse])
@@ -72,31 +77,56 @@ def list_tasks(
     status_filter: Optional[str] = Query(None, alias="status"),
     category: Optional[str] = Query(None)
 ):
-    """List tasks with optional filters"""
+    """List tasks with optional filters.
+
+    返回完整字段（含 enrichment 字段：view_count / favorite_count / comment_count /
+    application_count / skills_required / cover_emoji / cover_gradient / urgent /
+    featured / deadline），并 LEFT JOIN owners 把发布者卡片信息一并带出（owner_*）。
+    """
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
-            
-            query = "SELECT * FROM tasks WHERE 1=1"
+
+            query = """
+                SELECT
+                    t.id, t.owner_id, t.title, t.description, t.category, t.difficulty,
+                    t.reward_points, t.status, t.created_at, t.updated_at, t.completed_at,
+                    t.deadline, t.assigned_agent_id, t.estimated_hours, t.deliverable_type,
+                    t.required_capabilities, t.verification_required,
+                    t.view_count, t.favorite_count, t.comment_count, t.application_count,
+                    t.skills_required, t.cover_emoji, t.cover_gradient,
+                    t.urgent, t.featured,
+                    o.display_name     AS owner_display_name,
+                    o.organization     AS owner_organization,
+                    o.rating           AS owner_rating,
+                    o.verified         AS owner_verified,
+                    o.avatar_gradient  AS owner_avatar_gradient,
+                    o.email            AS owner_email
+                FROM tasks t
+                LEFT JOIN owners o ON o.id = t.owner_id
+                WHERE 1=1
+            """
             params = []
-            
+
             if status_filter:
-                query += " AND status = %s"
+                query += " AND t.status = %s"
                 params.append(status_filter)
-            
+
             if category:
-                query += " AND category = %s"
+                query += " AND t.category = %s"
                 params.append(category)
-            
-            query += " ORDER BY created_at DESC"
-            
+
+            query += " ORDER BY t.featured DESC, t.created_at DESC"
+
             cur.execute(query, params)
             tasks = cur.fetchall()
-            
+
             return [TaskListResponse(**dict(task)) for task in tasks]
-            
+
     except Exception as e:
         logger.error(f"Task listing failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task listing failed"
@@ -110,7 +140,7 @@ def get_task_detail(task_id: UUID):
             cur = conn.cursor()
             
             # Get task
-            cur.execute("SELECT * FROM tasks WHERE id = %s", (task_id,))
+            cur.execute("SELECT * FROM tasks WHERE id = %s", (str(task_id),))
             task = cur.fetchone()
             
             if not task:
@@ -122,14 +152,14 @@ def get_task_detail(task_id: UUID):
             # Get applications
             cur.execute(
                 "SELECT * FROM task_applications WHERE task_id = %s ORDER BY applied_at DESC",
-                (task_id,)
+                (str(task_id),)
             )
             applications = cur.fetchall()
             
             # Get submission
             cur.execute(
                 "SELECT * FROM task_submissions WHERE task_id = %s ORDER BY submitted_at DESC LIMIT 1",
-                (task_id,)
+                (str(task_id),)
             )
             submission = cur.fetchone()
             
@@ -170,7 +200,7 @@ def apply_to_task(
             cur = conn.cursor()
             
             # Check task exists and is open
-            cur.execute("SELECT status FROM tasks WHERE id = %s", (task_id,))
+            cur.execute("SELECT status FROM tasks WHERE id = %s", (str(task_id),))
             task = cur.fetchone()
             
             if not task:
@@ -194,7 +224,7 @@ def apply_to_task(
                 VALUES (%s, %s, %s, %s)
                 RETURNING id
                 """,
-                (task_id, agent_id, request.cover_letter, request.estimated_completion_time)
+                (str(task_id), str(agent_id), request.cover_letter, request.estimated_completion_time)
             )
             result = cur.fetchone()
             application_id = result['id']
@@ -224,7 +254,7 @@ def assign_task(
             cur = conn.cursor()
             
             # Verify owner owns the task
-            cur.execute("SELECT owner_id, status FROM tasks WHERE id = %s", (task_id,))
+            cur.execute("SELECT owner_id, status FROM tasks WHERE id = %s", (str(task_id),))
             task = cur.fetchone()
             
             if not task:
@@ -296,7 +326,7 @@ def submit_task(
             # Verify agent is assigned to task
             cur.execute(
                 "SELECT assigned_agent_id, status FROM tasks WHERE id = %s",
-                (task_id,)
+                (str(task_id),)
             )
             task = cur.fetchone()
             
@@ -376,7 +406,7 @@ def review_task(
             # Verify owner owns the task
             cur.execute(
                 "SELECT owner_id, assigned_agent_id FROM tasks WHERE id = %s",
-                (task_id,)
+                (str(task_id),)
             )
             task = cur.fetchone()
             
@@ -395,7 +425,7 @@ def review_task(
             # Get submission
             cur.execute(
                 "SELECT id, agent_id FROM task_submissions WHERE task_id = %s ORDER BY submitted_at DESC LIMIT 1",
-                (task_id,)
+                (str(task_id),)
             )
             submission = cur.fetchone()
             
@@ -467,7 +497,7 @@ def review_task(
                 (points, points, submission['agent_id'], submission['agent_id'])
             )
             
-            # Run fraud detection (collusion check)
+            # Run fraud detection (collusion check + 5 anti-fraud rules)
             try:
                 risk_score = detect_collusion(owner_id, submission['agent_id'], task_id)
                 if risk_score > 0.7:
@@ -475,6 +505,20 @@ def review_task(
             except Exception as fraud_err:
                 logger.error(f"Fraud detection failed: {fraud_err}")
                 # Don't block review on fraud detection failure
+
+            # New: 5-rule anti_fraud service + reputation_scores refresh
+            try:
+                triggered = anti_fraud_svc.check_review_for_fraud(
+                    conn, owner_id, submission['agent_id'], task_id
+                )
+                if triggered:
+                    logger.warning(
+                        "anti_fraud rules triggered for task %s by owner %s: %s",
+                        task_id, owner_id,
+                        [a.rule_name for a in triggered],
+                    )
+            except Exception as af_err:
+                logger.error(f"anti_fraud service failed: {af_err}")
             
             logger.info(f"Task {task_id} reviewed with rating {request.rating}")
             

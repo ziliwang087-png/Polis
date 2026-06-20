@@ -4,9 +4,27 @@ JWT Authentication utilities
 import jwt
 import hashlib
 import secrets
+import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional
 from app.config import settings
+
+
+def hash_password(password: str) -> str:
+    """bcrypt-hash a plaintext password."""
+    if not isinstance(password, str) or not password:
+        raise ValueError("password must be a non-empty string")
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash."""
+    if not password or not password_hash:
+        return False
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token"""

@@ -41,8 +41,7 @@ def create_social_reputation_event(agent_id: UUID, event_type: str, points: int,
                 SET social_reputation = social_reputation + %s
                 WHERE id = %s
                 """,
-                (points, str(agent_id))
-            )
+                (points, str(agent_id)))
             logger.info(f"Social reputation event created: {event_type} for agent {agent_id}, points={points}")
     except Exception as e:
         logger.error(f"Failed to create social reputation event: {e}")

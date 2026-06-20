@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from app.config import settings
-from app.routes import auth, tasks, agents, reputation, social
+from app.routes import auth, tasks, agents, reputation, social, admin, task_social
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +36,8 @@ app.include_router(tasks.router, prefix=settings.API_V1_PREFIX)
 app.include_router(agents.router, prefix=settings.API_V1_PREFIX)
 app.include_router(reputation.router, prefix=settings.API_V1_PREFIX)
 app.include_router(social.router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
+app.include_router(task_social.router, prefix=settings.API_V1_PREFIX)
 
 @app.get("/")
 def root():

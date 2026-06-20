@@ -12,7 +12,7 @@ Polis 内置平台 Agent
     POLIS_PLATFORM_AGENT_LLM_BASE  OpenAI 兼容 base URL，例如 https://chat.aiprox.net/v1
     POLIS_PLATFORM_AGENT_LLM_KEY   API key
     POLIS_PLATFORM_AGENT_LLM_MODEL 默认 gpt-4o-mini
-    POLIS_PLATFORM_AGENT_SKILLS    逗号分隔，默认 "python,write,review"
+    POLIS_PLATFORM_AGENT_SKILLS    逗号分隔，默认 "python,write,review,research"
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from app.database import get_db_connection
 
 logger = logging.getLogger("polis.platform_agent")
 
-DEFAULT_SKILLS = ["python", "write", "review"]
+DEFAULT_SKILLS = ["python", "write", "review", "research"]
 DEFAULT_PLATFORM_PROMPT = """你是 Polis 任务网络上的一个 AI agent。
 用户发任务给你，你按要求干活，直接返回结果。
 

@@ -114,19 +114,26 @@ export default function AgentsPage() {
                       {agent.description}
                     </p>
 
-                    {agent.skills.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-3">
-                        {agent.skills.map((s) => (
-                          <span
-                            key={s.skill_id}
-                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                            style={{ background: '#eef2ff', color: '#4338ca' }}
-                          >
-                            #{s.skill_id}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {(() => {
+                      // 后端有时只在 agent_card 里返回 skills，做向后兼容
+                      const skills = agent.skills?.length
+                        ? agent.skills
+                        : agent.agent_card?.skills ?? [];
+                      if (!skills.length) return null;
+                      return (
+                        <div className="flex flex-wrap gap-1.5 mt-3">
+                          {skills.map((s) => (
+                            <span
+                              key={s.skill_id}
+                              className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                              style={{ background: '#eef2ff', color: '#4338ca' }}
+                            >
+                              #{s.skill_id}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-4 text-xs text-gray-500">
                       <span>endpoint: <span className="font-mono">{agent.endpoint_url}</span></span>
@@ -138,8 +145,8 @@ export default function AgentsPage() {
                         <CheckIcon size={12} strokeWidth={2} />
                         总任务 {agent.total_jobs}
                       </span>
-                      <span>成功率 {(agent.success_rate * 100).toFixed(0)}%</span>
-                      <span>评分 {agent.avg_rating.toFixed(1)}</span>
+                      <span>成功率 {agent.success_rate != null ? (agent.success_rate * 100).toFixed(0) : '-'}%</span>
+                      <span>评分 {agent.avg_rating != null ? agent.avg_rating.toFixed(1) : '-'}</span>
                       {agent.last_heartbeat_at && (
                         <span className="flex items-center gap-1">
                           <ClockIcon size={12} strokeWidth={2} />

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from app.config import settings
+from app.database import get_db_connection
 from app.routes import auth, agents, jobs
 
 # Configure logging
@@ -65,6 +66,68 @@ def health():
 def agent_card():
     """Polis meta-agent card for A2A discovery."""
     api_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}{settings.API_V1_PREFIX}"
+    fallback_skills = [
+        {
+            "id": "polis.jobs.create",
+            "name": "Create Polis job",
+            "description": "Create an A2A task/job with messages and optional Supabase-backed attachments.",
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "polis.jobs.claim",
+            "name": "Claim Polis job",
+            "description": "Claim submitted jobs with PostgreSQL row-lock concurrency protection.",
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "polis.jobs.deliver",
+            "name": "Deliver Polis artifact",
+            "description": "Submit A2A artifacts and stream job events back to clients.",
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json", "text/event-stream"],
+        },
+    ]
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT
+                    s.skill_id,
+                    COALESCE(MAX(NULLIF(s.name, '')), s.skill_id) AS name,
+                    COUNT(DISTINCT s.agent_id) AS agent_count,
+                    COUNT(DISTINCT s.agent_id) FILTER (
+                        WHERE a.status IN ('online', 'busy')
+                    ) AS online_agent_count
+                FROM agent_skills s
+                JOIN agents a ON a.id = s.agent_id
+                GROUP BY s.skill_id
+                HAVING COUNT(DISTINCT s.agent_id) FILTER (
+                    WHERE a.status IN ('online', 'busy')
+                ) > 0
+                ORDER BY online_agent_count DESC, agent_count DESC, s.skill_id ASC
+                LIMIT 50
+                """
+            )
+            dynamic_skills = [
+                {
+                    "id": row["skill_id"],
+                    "name": row["name"] or row["skill_id"],
+                    "description": (
+                        f"Available from {row['online_agent_count']} online Polis agent(s) "
+                        f"and {row['agent_count']} registered agent(s)."
+                    ),
+                    "inputModes": ["text/plain", "application/json"],
+                    "outputModes": ["text/plain", "application/json"],
+                }
+                for row in cur.fetchall()
+            ]
+    except Exception:
+        logging.getLogger("polis").exception("failed to load dynamic agent-card skills")
+        dynamic_skills = []
+
     return {
         "name": "Polis",
         "description": "Polis is an A2A-compatible job network for registering agents, broadcasting tasks, claiming work, and returning artifacts.",
@@ -77,29 +140,7 @@ def agent_card():
         },
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["text/plain", "application/json"],
-        "skills": [
-            {
-                "id": "polis.jobs.create",
-                "name": "Create Polis job",
-                "description": "Create an A2A task/job with messages and optional Supabase-backed attachments.",
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json"],
-            },
-            {
-                "id": "polis.jobs.claim",
-                "name": "Claim Polis job",
-                "description": "Claim submitted jobs with PostgreSQL row-lock concurrency protection.",
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json"],
-            },
-            {
-                "id": "polis.jobs.deliver",
-                "name": "Deliver Polis artifact",
-                "description": "Submit A2A artifacts and stream job events back to clients.",
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json", "text/event-stream"],
-            },
-        ],
+        "skills": dynamic_skills or fallback_skills,
     }
 
 if __name__ == "__main__":

@@ -63,3 +63,11 @@ temp/
 
 # Nested unrelated repo (hermes-webui dev work, not part of Polis)
 backend/hermes-webui/
+
+# Loop Engineering local-only files
+backend/scripts/loop/.env.loop
+backend/scripts/loop/state.json
+backend/scripts/loop/last_verify.log
+backend/scripts/loop/runner.log
+.hermes-tmp.*
+**/.hermes-tmp.*

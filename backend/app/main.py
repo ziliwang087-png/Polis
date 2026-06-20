@@ -21,6 +21,17 @@ app = FastAPI(
     description="A2A-compatible task network for Chinese-speaking AI engineers"
 )
 
+
+@app.on_event("startup")
+def _start_platform_agent():
+    """启动平台内置 agent（如果环境变量配齐了）。失败不影响 web 服务。"""
+    try:
+        from app.platform_agent import maybe_start_platform_agent
+        maybe_start_platform_agent()
+    except Exception:
+        logging.getLogger("polis").exception("platform-agent startup hook crashed")
+
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,

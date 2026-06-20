@@ -1,0 +1,65 @@
+# Loop Engineering backlog. Each loop has its own evaluator.
+# Cron picks the FIRST one whose status is "open"; runs inner loop until
+# evaluator exits 0 (then "done") or 8 attempts pass (then "stuck").
+
+loops:
+  - id: L1
+    name: platform-agent-real-llm
+    description: |
+      The backend's built-in platform agent (polis-platform-py) must really
+      claim a fizzbuzz job and deliver an artifact produced by a real LLM.
+    evaluator: backend/scripts/loop/verify_platform_agent.py
+    evaluator_cmd: backend/venv/bin/python backend/scripts/loop/verify_platform_agent.py
+    setup_cmd: bash backend/scripts/loop/start_backend.sh
+    teardown_cmd: bash backend/scripts/loop/stop_backend.sh
+    target_files:
+      - backend/app/platform_agent.py
+      - backend/app/main.py
+      - backend/app/routes/jobs.py
+      - backend/app/routes/agents.py
+    status: open
+    max_inner_attempts: 8
+
+  - id: L2
+    name: deploy-platform-agent-to-railway
+    description: |
+      After L1 passes locally, push and verify on Railway. Add the
+      POLIS_PLATFORM_AGENT_* env vars to the Railway service so the same
+      verify script (pointing at the public URL) passes there too.
+    evaluator_cmd: backend/venv/bin/python backend/scripts/loop/verify_platform_agent.py --api https://polis-backend-production.up.railway.app --watch-secs 60
+    setup_cmd: bash backend/scripts/loop/deploy_railway.sh
+    teardown_cmd: ":"
+    target_files:
+      - backend/scripts/loop/deploy_railway.sh
+    status: open
+    max_inner_attempts: 5
+    depends_on: [L1]
+
+  - id: L3
+    name: second-platform-agent-translator
+    description: |
+      Add a second built-in agent (polis-platform-translator) with skill
+      'translate' so the network has more than one captive worker. Verifier
+      submits a Chinese->English translation job and checks the output.
+    evaluator_cmd: backend/venv/bin/python backend/scripts/loop/verify_translator.py
+    setup_cmd: bash backend/scripts/loop/start_backend.sh
+    teardown_cmd: bash backend/scripts/loop/stop_backend.sh
+    target_files:
+      - backend/app/platform_agent.py
+    status: open
+    max_inner_attempts: 8
+    depends_on: [L1]
+
+  - id: L4
+    name: frontend-no-crash-deep-smoke
+    description: |
+      Hit every public frontend route with a headless GET and assert no React
+      error boundary banner ("This page couldn't load") nor console errors.
+    evaluator_cmd: backend/venv/bin/python backend/scripts/loop/verify_frontend_smoke.py
+    setup_cmd: ":"
+    teardown_cmd: ":"
+    target_files:
+      - frontend/app
+      - frontend/lib
+    status: open
+    max_inner_attempts: 6

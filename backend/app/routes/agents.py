@@ -5,8 +5,9 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, status, Depends
+from fastapi import APIRouter, Header, HTTPException, status, Depends, Query
 from psycopg2.extras import Json
+from starlette.responses import StreamingResponse
 
 from app.auth import create_access_token
 from app.database import get_db_connection
@@ -93,34 +94,79 @@ def create_agent(
             )
             row = cur.fetchone()
 
-            for skill in _card_skills(agent_card):
-                skill_id = skill.get("id") or skill.get("skill_id") or skill.get("name")
-                if not skill_id or not skill.get("name"):
+            # Collect skill names from two sources:
+            # 1) request.skills (plain string list — newcomer UX)
+            # 2) request.agent_card.skills (mixed: A2A structured dicts OR strings)
+            seen_skill_ids = set()
+
+            for plain in request.skills:
+                if not plain:
                     continue
+                sk = plain.strip()
+                if not sk or sk in seen_skill_ids:
+                    continue
+                seen_skill_ids.add(sk)
                 cur.execute(
                     """
                     INSERT INTO agent_skills (
                         agent_id, skill_id, name, description, examples,
                         input_schema, output_schema
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (agent_id, skill_id) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        description = EXCLUDED.description,
-                        examples = EXCLUDED.examples,
-                        input_schema = EXCLUDED.input_schema,
-                        output_schema = EXCLUDED.output_schema
+                    VALUES (%s, %s, %s, NULL, NULL, NULL, NULL)
+                    ON CONFLICT (agent_id, skill_id) DO NOTHING
                     """,
-                    (
-                        str(row["id"]),
-                        skill_id,
-                        skill["name"],
-                        skill.get("description"),
-                        Json(skill.get("examples")),
-                        Json(skill.get("inputSchema") or skill.get("input_schema")),
-                        Json(skill.get("outputSchema") or skill.get("output_schema")),
-                    ),
+                    (str(row["id"]), sk, sk),
                 )
+
+            for raw in (agent_card.get("skills") or []):
+                # A2A structured form
+                if isinstance(raw, dict):
+                    skill_id = raw.get("id") or raw.get("skill_id") or raw.get("name")
+                    skill_name = raw.get("name")
+                    if not skill_id or not skill_name or skill_id in seen_skill_ids:
+                        continue
+                    seen_skill_ids.add(skill_id)
+                    cur.execute(
+                        """
+                        INSERT INTO agent_skills (
+                            agent_id, skill_id, name, description, examples,
+                            input_schema, output_schema
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (agent_id, skill_id) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            description = EXCLUDED.description,
+                            examples = EXCLUDED.examples,
+                            input_schema = EXCLUDED.input_schema,
+                            output_schema = EXCLUDED.output_schema
+                        """,
+                        (
+                            str(row["id"]),
+                            skill_id,
+                            skill_name,
+                            raw.get("description"),
+                            Json(raw.get("examples")),
+                            Json(raw.get("inputSchema") or raw.get("input_schema")),
+                            Json(raw.get("outputSchema") or raw.get("output_schema")),
+                        ),
+                    )
+                # Plain string form (UUMit-style UX)
+                elif isinstance(raw, str) and raw.strip():
+                    sk = raw.strip()
+                    if sk in seen_skill_ids:
+                        continue
+                    seen_skill_ids.add(sk)
+                    cur.execute(
+                        """
+                        INSERT INTO agent_skills (
+                            agent_id, skill_id, name, description, examples,
+                            input_schema, output_schema
+                        )
+                        VALUES (%s, %s, %s, NULL, NULL, NULL, NULL)
+                        ON CONFLICT (agent_id, skill_id) DO NOTHING
+                        """,
+                        (str(row["id"]), sk, sk),
+                    )
 
         token = create_access_token({"sub": str(row["id"]), "type": "agent"})
         return _agent_response(row, token=token)
@@ -209,3 +255,41 @@ def delete_agent(agent_id: UUID, owner_id: UUID = Depends(get_current_owner)):
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Agent not found")
         return {"deleted": True}
+
+
+@router.get("/{agent_id}/inbox")
+async def stream_agent_inbox(
+    agent_id: UUID,
+    authorization: Optional[str] = Header(None),
+    once: bool = Query(False, description="Return current matches then close"),
+):
+    """
+    SSE stream of jobs matching this agent's skills.
+
+    Auth: agent JWT or owner user JWT.
+    Behaviour:
+      1. Phase 1 — Backlog: emit every currently-`submitted` job whose
+         `required_skill` is in this agent's declared skill set as
+         `event: job.available`.
+      2. Phase 2 — Live: LISTEN polis_jobs and forward every newly-created
+         matching job (also `event: job.available`).
+      3. Heartbeat every 15s (`event: heartbeat`). Stream caps at 10 minutes.
+
+    Pass `?once=true` to skip phase 2 (useful for HTTP smoke tests).
+    """
+    from app.routes.jobs import _build_inbox_generator, _agent_skill_set, _agent_owned_by, _sse_raw
+
+    subject_id, subject_type = get_current_user(authorization)
+
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        _agent_owned_by(cur, agent_id, subject_id, subject_type)
+        skills = _agent_skill_set(cur, agent_id)
+
+    if not skills:
+        async def empty_stream():
+            yield _sse_raw("info", {"reason": "agent has no skills declared"})
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    generator = _build_inbox_generator(agent_id, list(skills), skills, once)
+    return StreamingResponse(generator(), media_type="text/event-stream")

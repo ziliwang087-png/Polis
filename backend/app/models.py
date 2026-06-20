@@ -279,6 +279,11 @@ class AgentCreateRequest(BaseModel):
     auth_config: Dict[str, Any] = Field(default_factory=dict)
     agent_card: Dict[str, Any]
     status: Literal["online", "offline", "busy"] = "offline"
+    skills: List[str] = Field(
+        default_factory=list,
+        description="Plain skill names. Stored alongside any structured "
+                    "skills declared in agent_card.skills.",
+    )
 
 
 class AgentHeartbeatRequest(BaseModel):

@@ -562,6 +562,101 @@ def _sse_line(event: Dict[str, Any]) -> str:
     )
 
 
+def _sse_raw(event_type: str, data: Any, event_id: Optional[str] = None) -> str:
+    payload = json.dumps(jsonable_encoder(data), ensure_ascii=False)
+    parts = []
+    if event_id:
+        parts.append(f"id: {event_id}")
+    parts.append(f"event: {event_type}")
+    parts.append(f"data: {payload}")
+    return "\n".join(parts) + "\n\n"
+
+
+def _agent_skill_set(cur, agent_id: UUID) -> set:
+    cur.execute(
+        "SELECT name FROM agent_skills WHERE agent_id = %s",
+        (str(agent_id),),
+    )
+    return {row["name"] for row in cur.fetchall()}
+
+
+def _agent_owned_by(cur, agent_id: UUID, subject_id: UUID, subject_type: str):
+    """Verify the caller (user or agent JWT subject) is allowed to read this agent's inbox."""
+    cur.execute("SELECT id, owner_id FROM agents WHERE id = %s", (str(agent_id),))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if subject_type == "agent" and row["id"] != subject_id:
+        raise HTTPException(status_code=403, detail="Agent token mismatch")
+    if subject_type == "user" and row["owner_id"] != subject_id:
+        raise HTTPException(status_code=403, detail="You do not own this agent")
+    return row
+
+
+def _build_inbox_generator(agent_id: UUID, skill_list: List[str], skills: set, once: bool):
+    """Factory used by the agents router to stream the inbox SSE.
+
+    Implementation: DB polling every 2s. Tried PG LISTEN/NOTIFY first,
+    but Supabase's transaction-mode pooler (port 6543) does not support
+    session-level LISTEN. Polling is more portable and the latency is
+    acceptable for a task marketplace (~2s).
+    """
+    async def inbox_generator():
+        seen: set = set()
+
+        # ── Phase 1: backlog ──────────────────────────────────────────────
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT * FROM jobs
+                WHERE status = 'submitted'
+                  AND required_skill = ANY(%s)
+                ORDER BY created_at ASC
+                """,
+                (skill_list,),
+            )
+            for row in cur.fetchall():
+                seen.add(str(row["id"]))
+                yield _sse_raw("job.available", _job_response(cur, row), event_id=str(row["id"]))
+
+        if once:
+            return
+
+        # ── Phase 2: live polling (Supabase pooler-safe) ──────────────────
+        deadline = time.monotonic() + 600  # 10 min cap
+        last_heartbeat = time.monotonic()
+
+        while time.monotonic() < deadline:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT * FROM jobs
+                    WHERE status = 'submitted'
+                      AND required_skill = ANY(%s)
+                      AND id != ALL(%s)
+                    ORDER BY created_at ASC
+                    """,
+                    (skill_list, list(seen) or [""]),
+                )
+                fresh = cur.fetchall()
+                for row in fresh:
+                    job_id = str(row["id"])
+                    if job_id in seen:
+                        continue
+                    seen.add(job_id)
+                    yield _sse_raw("job.available", _job_response(cur, row), event_id=job_id)
+
+            if time.monotonic() - last_heartbeat >= 15:
+                last_heartbeat = time.monotonic()
+                yield _sse_raw("heartbeat", {"ts": int(last_heartbeat)})
+
+            await asyncio.sleep(2)
+
+    return inbox_generator
+
+
 @router.get("/{job_id}/events")
 async def stream_job_events(
     job_id: UUID,

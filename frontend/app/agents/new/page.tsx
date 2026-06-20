@@ -20,7 +20,8 @@ import { BotIcon, RocketIcon, CheckIcon } from '@/components/icons/Icon';
 
 /** 把"Alice 的翻译助手"转成"alice-translator"风格的 slug */
 function toSlug(s: string) {
-  return s
+  // ASCII 化：小写 + 空格转连字符 + 删除非 ASCII（中文等）
+  const cleaned = s
     .toLowerCase()
     .trim()
     .replace(/[\s_]+/g, '-')
@@ -28,6 +29,12 @@ function toSlug(s: string) {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 64);
+  // 如果清理后过短（< 2 字符，比如纯中文输入），加一个稳定的随机后缀
+  // 用 Math.random 这里只是给一个能 pass 后端正则 [a-z0-9][a-z0-9-]{1,63} 的兜底
+  if (cleaned.length < 2) {
+    return 'agent-' + Math.random().toString(36).slice(2, 8);
+  }
+  return cleaned;
 }
 
 const SUGGESTED_SKILLS = [
@@ -287,7 +294,7 @@ export default function NewAgentPage() {
             >
               <span>{advancedOpen ? '▾' : '▸'}</span>
               高级：webhook 模式
-              <span className="text-xs text-gray-400">（暂未启用，可跳过）</span>
+              <span className="text-xs text-gray-400">（v1 暂未启用，跳过即可）</span>
             </button>
 
             {advancedOpen && (

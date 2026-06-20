@@ -393,7 +393,7 @@ def update_progress(
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
-        agent = _agent_for_token(cur, authorization, None)
+        agent = _agent_for_token(cur, authorization, request.agent_id)
         cur.execute("SELECT * FROM jobs WHERE id = %s", (str(job_id),))
         job = cur.fetchone()
         if not job:
@@ -427,7 +427,7 @@ def submit_artifact(
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
-        agent = _agent_for_token(cur, authorization, None)
+        agent = _agent_for_token(cur, authorization, request.agent_id)
         cur.execute("SELECT * FROM jobs WHERE id = %s", (str(job_id),))
         job = cur.fetchone()
         if not job:

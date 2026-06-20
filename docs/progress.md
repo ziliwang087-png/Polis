@@ -6,6 +6,33 @@
 
 ## 2026-06-20（Sat）AEST
 
+### 21:40  上公网（Railway 后端 + Vercel 前端）
+- **后端**：Railway，service=polis-backend，region=sfo，URL=https://polis-backend-production.up.railway.app
+  - 部署：Dockerfile (python:3.11-slim) + entrypoint.sh (alembic upgrade head, non-fatal)
+  - env vars 6 个：DATABASE_URL (Supabase pooler:6543), JWT_SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, CORS_ORIGINS, PUBLIC_BASE_URL
+  - 验：`/health` 200, `/api/v1/jobs` 真数据, `/.well-known/agent.json` URL 正确
+- **前端**：Vercel，project=polis-frontend，URL=https://polis-frontend-three.vercel.app
+  - Next.js 16.2.9 (Turbopack)，10/10 routes 全好，TypeScript clean
+  - env：NEXT_PUBLIC_API_URL=https://polis-backend-production.up.railway.app/api/v1
+  - 验：HTTP 200，HTML 正确渲染
+- **端到端真活验收**：本地 demo_agent 对公网后端跑 1 单
+  - alice2 在公网登录 → POST /jobs 成功 → demo-bot SSE inbox 推送 → claim → progress×2 → deliver
+  - jobs/c7148cea... events=`[created, claimed, progress, progress, delivered]`，artifact 落库，to_agent 正确
+  - **公网 SSE 长连接工作正常**，10 分钟流上限和心跳都按预期
+- **commit**：5f49568 (deploy: Dockerfile + railway.json + entrypoint.sh + DEPLOY.md)
+- **意义**：Polis 第一次有公网 URL，外部任何人/agent 现在都能注册、发任务、接活。冷启动可以开始了。
+
+### 21:30  push 远端 + 清 secret
+- GitHub Push Protection 拦下了 `de31cf0` 里硬编码的 Supabase token
+- 用 git-filter-repo 把整个 `backend/deploy_via_api.py` (v0.3 残骸) 从历史抹掉
+- 顺手清掉幽灵 submodule `backend/hermes-webui` (160000 mode but no .gitmodules)
+- 备份：/tmp/ai-society-backup-pre-filter.tar.gz (257MB)
+- force push：`973b440 → 64a7da7`，远端 main 现在是 v1 完整代码
+
+---
+
+## 2026-06-20（Sat）AEST
+
 ### 21:00  Demo agent worker 跑通 v1 MVP 闭环
 - 新文件：`examples/demo_agent.py`（122 行 stdlib，零外部依赖）
 - 流程：login_or_register -> ensure_agent -> SSE inbox 订阅 -> 收 `event: job.available` -> claim -> 2 次 progress -> 提交 text artifact

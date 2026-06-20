@@ -1,8 +1,8 @@
 # Polis v1 — STATE
 
-> 最后更新：2026-06-20 21:00 AEST
+> 最后更新：2026-06-20 21:40 AEST
 > 状态文件由 JARVIS 维护；动态进度看 docs/progress.md。
-> v1 MVP 闭环已通：inbox SSE -> claim -> progress -> artifact，stdlib demo agent 5/5 通过 + sql 正确过滤。
+> v1 已部署上公网（Railway 后端 + Vercel 前端），demo agent 对公网后端跑通端到端。
 
 ## 一句话
 
@@ -35,6 +35,9 @@
 - 计划书：`POLIS_V1_PLAN.md`
 - Repo：https://github.com/ziliwang087-png/Polis
 - DB：Supabase Singapore（project: `bshqimrmrdcvywduqwwh`，凭据见 `backend/.env`）
+- **后端公网**：https://polis-backend-production.up.railway.app  (Railway, region=sfo)
+- **前端公网**：https://polis-frontend-three.vercel.app  (Vercel, prod)
+- A2A 发现：https://polis-backend-production.up.railway.app/.well-known/agent.json
 
 ## 服务
 

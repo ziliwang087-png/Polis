@@ -7,9 +7,25 @@ Usage:
   python3 demo_agent.py --api http://127.0.0.1:8000 \
     --email demo-bot@example.com --password demo-pass-123 \
     --agent-name demo-bot --skills code_review,python,translation
+
+LLM config:
+  --llm-base / --llm-key / --llm-model, or POLIS_DEMO_AGENT_LLM_* env vars,
+  or ~/.hermes/config.yaml model.api_key/base_url/default.
 """
 from __future__ import annotations
-import argparse, json, sys, time, urllib.request, urllib.error
+import argparse, json, os, pathlib, re, sys, time, urllib.request, urllib.error
+
+SYSTEM_PROMPT = """You are a demo Polis agent.
+Do the user's task directly and return the final artifact only.
+
+Rules:
+- If the task asks for code, return a complete runnable code block.
+- If the task asks for translation, return only the translation.
+- Do not greet, explain your process, or mention that you are an AI.
+- If the task is unclear, ask for the missing details concisely.
+"""
+
+MAX_DESC_CHARS = 8000
 
 
 def http(method, url, token=None, body=None, stream=False, timeout=30):
@@ -63,7 +79,80 @@ def parse_sse(stream):
             data.append(line[5:].lstrip())
 
 
-def work(api, agent_id, token, job):
+def read_hermes_model_config():
+    path = pathlib.Path.home() / ".hermes" / "config.yaml"
+    if not path.exists():
+        return {}
+    text = path.read_text()
+    block = re.search(r"^model:\s*\n((?:  .*\n)+)", text, re.M)
+    default_model = re.search(r"^  default:\s*(\S+)", text, re.M)
+    if not block:
+        return {}
+    api_key = re.search(r"api_key:\s*(\S+)", block.group(1))
+    base_url = re.search(r"base_url:\s*(\S+)", block.group(1))
+    return {
+        "key": api_key.group(1) if api_key else None,
+        "base": base_url.group(1) if base_url else None,
+        "model": default_model.group(1) if default_model else None,
+    }
+
+
+def llm_config(args):
+    hermes = read_hermes_model_config()
+    cfg = {
+        "base": (
+            args.llm_base
+            or os.getenv("POLIS_DEMO_AGENT_LLM_BASE")
+            or hermes.get("base")
+            or "https://chat.aiprox.net/v1"
+        ),
+        "key": args.llm_key or os.getenv("POLIS_DEMO_AGENT_LLM_KEY") or hermes.get("key"),
+        "model": (
+            args.llm_model
+            or os.getenv("POLIS_DEMO_AGENT_LLM_MODEL")
+            or hermes.get("model")
+            or "claude-opus-4-7"
+        ),
+    }
+    if not cfg["key"]:
+        raise SystemExit(
+            "[ERR] missing LLM key. Set --llm-key, POLIS_DEMO_AGENT_LLM_KEY, "
+            "or ~/.hermes/config.yaml model.api_key"
+        )
+    return cfg
+
+
+def call_llm(cfg, job):
+    title = job.get("title") or "(untitled)"
+    skill = job.get("required_skill") or "(unknown)"
+    desc = job.get("description") or ""
+    prompt = f"Task title: {title}\nRequired skill: {skill}\n\nTask description:\n{desc}"
+    body = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt[:MAX_DESC_CHARS]},
+        ],
+        "temperature": 0.4,
+    }
+    req = urllib.request.Request(
+        cfg["base"].rstrip("/") + "/chat/completions",
+        method="POST",
+        data=json.dumps(body).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {cfg['key']}",
+        },
+    )
+    try:
+        raw = urllib.request.urlopen(req, timeout=60).read().decode()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"LLM HTTP {e.code}: {e.read().decode(errors='replace')[:300]}") from e
+    data = json.loads(raw)
+    return data["choices"][0]["message"]["content"]
+
+
+def work(api, agent_id, token, job, llm_cfg):
     jid = job["id"]
     print(f"  >> claim {jid}  ({job['required_skill']}: {job['title']!r})")
     http("POST", f"{api}/api/v1/jobs/{jid}/claim", token=token, body={"agent_id": agent_id})
@@ -71,10 +160,10 @@ def work(api, agent_id, token, job):
         time.sleep(0.3)
         http("POST", f"{api}/api/v1/jobs/{jid}/progress", token=token,
              body={"agent_id": agent_id, "progress": f"working... {pct}%"})
-    artifact = f"[demo-bot] handled '{job['title']}' for skill '{job['required_skill']}'"
+    artifact = call_llm(llm_cfg, job)
     http("POST", f"{api}/api/v1/jobs/{jid}/artifacts", token=token, body={
         "agent_id": agent_id, "type": "text", "content": artifact,
-        "metadata": {"by": "demo_agent.py"},
+        "metadata": {"by": "demo_agent.py", "model": llm_cfg["model"]},
     })
     print(f"  ok delivered {jid}")
 
@@ -88,8 +177,12 @@ def main():
     ap.add_argument("--agent-name", required=True)
     ap.add_argument("--skills", required=True, help="comma-separated")
     ap.add_argument("--max-jobs", type=int, default=0, help="0=forever")
+    ap.add_argument("--llm-base", default=None)
+    ap.add_argument("--llm-key", default=None)
+    ap.add_argument("--llm-model", default=None)
     args = ap.parse_args()
 
+    llm_cfg = llm_config(args)
     skills = [s.strip() for s in args.skills.split(",") if s.strip()]
     user_token = login_or_register(args.api, args.email, args.password,
                                    args.username or args.email.split("@")[0])
@@ -113,7 +206,7 @@ def main():
                     continue
                 job = json.loads(payload)
                 try:
-                    work(args.api, agent_id, token, job)
+                    work(args.api, agent_id, token, job, llm_cfg)
                     done += 1
                 except SystemExit as e:
                     print(f"  ! skipped: {e}", file=sys.stderr)

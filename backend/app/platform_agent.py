@@ -270,6 +270,12 @@ def _worker_loop(api, agent_id, token, agent_spec, llm_cfg):
             worker_heartbeat.beat_connected(name)
             logger.info("[platform-agent] inbox connected name=%s", name)
             for event, payload in _parse_sse(stream):
+                # Backend emits `event: heartbeat` every 15s on the inbox SSE.
+                # Use it to refresh the worker's last_seen_at so an idle
+                # worker holding a long-lived connection still looks fresh.
+                if event == "heartbeat":
+                    worker_heartbeat.beat_keepalive(name)
+                    continue
                 if event != "job.available":
                     continue
                 try:

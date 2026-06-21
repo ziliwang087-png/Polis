@@ -280,6 +280,8 @@ class WorkerInfo(BaseModel):
     is_fresh: bool = False
     connected: bool = False
     last_connected_at: Optional[int] = None
+    last_keepalive_at: Optional[int] = None
+    keepalives: int = 0
     last_job_received_at: Optional[int] = None
     last_job_done_at: Optional[int] = None
     last_job_id: Optional[str] = None

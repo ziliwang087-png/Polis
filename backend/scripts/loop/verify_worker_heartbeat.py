@@ -99,9 +99,43 @@ def scenario_stale_worker():
     print("  [pass] stale worker: all_fresh=False status=", body.get("status"))
 
 
+def scenario_keepalive_refresh():
+    """L21: SSE heartbeat event refreshes last_seen_at without job activity.
+
+    Idle worker on a long-lived connection should still report is_fresh=True
+    if the inbox emits a periodic `event: heartbeat` (every 15s on backend)
+    and we tick beat_keepalive() on each one.
+    """
+    app, worker_heartbeat = _fresh_app({"POLIS_WORKER_FRESHNESS_SECS": "1"})
+    worker_heartbeat.register("polis_python", agent_id="agent-uuid")
+    worker_heartbeat.beat_connected("polis_python")
+    # Simulate 5s of silence (would be stale)
+    worker_heartbeat._workers["polis_python"]["last_seen_at"] = int(time.time()) - 5
+    # Then a keepalive arrives -> refresh
+    worker_heartbeat.beat_keepalive("polis_python")
+
+    client = TestClient(app)
+    r = client.get("/health/deep")
+    body = r.json()
+    workers = body["workers"]
+    assert workers.get("all_fresh") is True, (
+        f"expected fresh after keepalive, got {workers}"
+    )
+    w0 = workers["workers"][0]
+    assert w0.get("keepalives") == 1, f"expected keepalives=1, got {w0}"
+    assert w0.get("connected") is True, f"keepalive should imply connected: {w0}"
+    print("  [pass] keepalive refresh: all_fresh=True keepalives=1")
+
+
 def main():
     failures = []
-    for fn in (scenario_no_workers, scenario_fresh_worker, scenario_stale_worker):
+    scenarios = (
+        scenario_no_workers,
+        scenario_fresh_worker,
+        scenario_stale_worker,
+        scenario_keepalive_refresh,
+    )
+    for fn in scenarios:
         try:
             print(f"-> {fn.__name__}")
             fn()

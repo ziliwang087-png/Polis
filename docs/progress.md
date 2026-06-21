@@ -6,6 +6,25 @@
 
 ## 2026-06-21（Sun）AEST
 
+### 19:30  L21 闭环：worker 心跳吃 SSE keepalive 事件，长连接静默期不再"假死"
+
+L19/L20 prod 验证暴露的真实缺口——worker SSE 长连接静默期间 `last_seen_at` 不刷新，`seconds_since_last_seen` 持续增长，过 600s 阈值会被误判 stale。但**后端 inbox SSE 早就每 15 秒发 `event: heartbeat`**（见 `routes/agents.py::stream_agent_inbox`），platform-agent 之前直接 `if event != "job.available": continue` 吃掉了。
+
+修复：
+
+- `worker_heartbeat.beat_keepalive(name)`：刷 last_seen_at + 计 keepalives 计数，同时把 connected 显式置 True（接收到心跳就证明连着）。
+- `_worker_loop`：识别 `event == "heartbeat"` 调 beat_keepalive。
+- `WorkerInfo` 加 `last_keepalive_at / keepalives` 字段。
+- 评估器加 scenario 4 `scenario_keepalive_refresh`：制造 5s 静默→stale 阈值=1s，然后 keepalive 一下应当立即 fresh=True。
+
+```
+verify_worker_heartbeat.py: 4/4 PASS
+  scenario_keepalive_refresh: all_fresh=True keepalives=1
+pytest tests/: 47 passed
+```
+
+副效应：worker 现在每 15s 至少打卡一次，可以把 freshness 阈值收紧（如 60s）实现更早 stuck 检测。当前保持 600s 默认值不动。
+
 ### 18:30  L20 闭环：/admin/workers admin endpoint + L19 prod 真验
 
 接 L19 worker 心跳基础设施，加 admin-only 端点供 ops（cron / 飞书每日摘要）拉详情。

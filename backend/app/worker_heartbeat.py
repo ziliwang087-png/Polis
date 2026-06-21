@@ -70,6 +70,23 @@ def beat_disconnected(name: str, error: str = "") -> None:
             w["errors"] = int(w.get("errors", 0)) + 1
 
 
+def beat_keepalive(name: str) -> None:
+    """Refresh last_seen_at without changing job/connect counters.
+
+    Called when the SSE inbox emits a `heartbeat` event (every ~15s on the
+    backend), so an idle worker on a long-lived connection still looks
+    fresh in /health/deep and /admin/workers.
+    """
+    with _lock:
+        w = _workers.setdefault(name, {"name": name, "started_at": _now()})
+        now = _now()
+        w["last_seen_at"] = now
+        w["last_keepalive_at"] = now
+        w["keepalives"] = int(w.get("keepalives", 0)) + 1
+        # If we're receiving keepalives, the connection IS open.
+        w["connected"] = True
+
+
 def beat_job_received(name: str, job_id: str = "") -> None:
     with _lock:
         w = _workers.setdefault(name, {"name": name, "started_at": _now()})

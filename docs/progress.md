@@ -325,3 +325,68 @@ LLM key 问题选 **路径 B**：不移植绕指纹逻辑。Polis 是纯撮合�
 3. demo_e2e.py 的 fallback 检测要在 watch 阶段也做（现在只在最后 assert 检测，4/5 那次实际全 fake 但 demo runner 没察觉）
 4. test-agent-v2 (id=164e01c4) 已下线，但 owner=843512ff 是某个用户号，看要不要彻底清掉这个测试账号
 5. 跑一次 DeepSeek 官方 key 的端到端（充 10 块就行）做 BYOK 权威验证
+
+---
+
+## 2026-06-21 16:02 AEST — Loop 自跑 L9-L12 闭合（用户出门期间）
+
+主人出门后,自定义验收标准继续干。所有评估器+pytest 47+prod 部署+5/5 e2e 全绿才算 ship。
+
+### L9 — inbox SSE 只对 online agent 推送 (commit 2f6e1cc)
+- `backend/app/routes/jobs.py::_build_inbox_generator` 加 `_is_online()` 检查
+  * Phase 1 (backlog) 一开始就查; offline 立即 yield `info(reason='agent offline')` 并 return
+  * Phase 2 (live polling) 每 tick 重检; 中途 agent 被设 offline 立即终止 stream
+- 新评估器 `verify_inbox_status_filter.py` 注册 online+offline 两个 agent
+  各打开 inbox?once=true,断言只 online 收到 job.available
+- pytest 47 passed (mock SQL handler 加了一条 status select case)
+
+### L10 — demo_e2e watch 阶段 fail-fast 检测 fallback (commit d93fa55)
+- 上午发现 Railway env 错配 + 任务全 fallback,demo_e2e 直到最后才识破。
+  现在 watch 阶段每次 status=completed 立即 detect,命中 fallback 立即 fail
+  并提示去检查 backend LLM_BASE/LLM_KEY env
+- `detect_fallback_artifact()` 抽出纯函数,5 种 marker 都覆盖
+- 评估器原本想搭"故意错 LLM key 起 backend"端到端测,发现本地 backend
+  共享 prod Supabase,prod platform-agent 会先把任务接走,验证不出 fallback
+  路径 — 改用 unit 级直接验证 detect+assert_real_artifact
+
+### L11 — stale-claim reaper (commit 1b08121)
+- 上午 test-agent-v2 抢 11 个任务后死翘翘的根本治理
+- 新 `app/stale_claim_reaper.py` 模块,FastAPI startup hook 起后台 task
+- 每 60s 一次 CTE 扫: status in (claimed,working) AND claimed_at>5min AND
+  最近 5 分钟无 progress 事件; 命中即原子重置回 submitted + 写 canceled
+  事件 payload {reason: 'stale_claim_reaped', previous_agent_id}
+- 用 'canceled' enum + reason 字段而非加新 enum value,避免在这个 PR 里
+  做 ALTER TYPE migration; 留作 morning recommendation
+- 评估器注 stale/fresh/progressing 三种, 验证 stale 被 reap、fresh 不被
+  误杀、actively-progressing 不被误杀, 始末 cleanup db
+
+### 顺手修了 pre-existing bug (commit 9f7bf81)
+- `test_agent_card_discovery_is_a2a_compatible` 在 d93fa55 之前就挂(46 passed)
+- 根因: `/.well-known/agent.json` 用 `dynamic_skills or fallback_skills`,
+  agents 表一非空就把 polis.jobs.create/claim/deliver 三个平台元能力
+  挤掉。改成 `fallback_skills + dynamic_skills`(meta + dynamic 该 compose)
+- 修完: pytest 47 passed (完整 baseline)
+
+### L12 — 总验收 (e2e 报告 docs/demos/polis-prod-e2e-20260621-1601.md)
+- 之前 `railway redeploy` 不会拉新代码,只重启同 image —— 改用
+  `railway up --detach` 触发 build。reaper 启动日志确认在 prod 上线
+  (05:58 启动, tick=60s, age=300s)
+- prod e2e 重跑 **5/5 完成,markers 全过,真 LLM artifact**
+- pytest 47 passed,L9/L10/L11 三个评估器全部 ALL CHECKS PASSED
+
+### 留给主人的下一步建议
+1. on_event(startup) deprecated — 移到 FastAPI lifespan handler
+2. shared Supabase 上累积的 demo 测试 user/job 要不要定期清
+3. 加 PG LISTEN 桥或 websocket 推送,消除 60s 通知窗口
+4. job_event_type enum 加 'stale_claim_reaped' value,reaper 审计
+   就不和用户发起的 canceled 多路复用了
+5. **BYOK 用真正官方 key (OpenAI/DeepSeek) 跑一次端到端** — aiprox
+   relay 已证明 work,但官方 key 普适性还没验
+6. 加 dashboard 显示 reaper 命中统计
+
+### Commits 这一轮
+- 2f6e1cc feat(L9): inbox SSE 只对 online agent 推送
+- d93fa55 feat(L10): demo_e2e watch 阶段 fail-fast on fallback
+- 1b08121 feat(L11): stale-claim reaper 后台清理僵尸任务
+- 9f7bf81 fix: agent_card.skills 合并 fallback meta + dynamic agent
+- (this commit) ops: state.json + progress.md 留档 L9-L12

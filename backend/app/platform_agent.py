@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 from psycopg2.extras import Json
 
 from app.database import get_db_connection
+from app import worker_heartbeat
 
 logger = logging.getLogger("polis.platform_agent")
 
@@ -260,23 +261,30 @@ def _work_one(api, agent_id, token, agent_spec, job, llm_cfg):
 
 
 def _worker_loop(api, agent_id, token, agent_spec, llm_cfg):
+    name = agent_spec["name"]
+    worker_heartbeat.register(name, agent_id=agent_id)
     while True:
         try:
             stream = _http("GET", f"{api}/api/v1/agents/{agent_id}/inbox",
                            token=token, stream=True, timeout=INBOX_TIMEOUT)
-            logger.info("[platform-agent] inbox connected name=%s", agent_spec["name"])
+            worker_heartbeat.beat_connected(name)
+            logger.info("[platform-agent] inbox connected name=%s", name)
             for event, payload in _parse_sse(stream):
                 if event != "job.available":
                     continue
                 try:
                     job = json.loads(payload)
+                    worker_heartbeat.beat_job_received(name, job_id=str(job.get("id", "")))
                     _work_one(api, agent_id, token, agent_spec, job, llm_cfg)
+                    worker_heartbeat.beat_job_done(name)
                 except Exception as e:
+                    worker_heartbeat.beat_error(name, repr(e))
                     logger.exception("[platform-agent] work failed: %s", e)
         except Exception as e:
+            worker_heartbeat.beat_disconnected(name, error=repr(e))
             logger.warning(
                 "[platform-agent] inbox dropped name=%s: %s -- reconnect in %ds",
-                agent_spec["name"],
+                name,
                 e,
                 RECONNECT_DELAY,
             )

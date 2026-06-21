@@ -112,6 +112,12 @@ async def health_deep():
     except Exception as exc:
         reaper = {"error": repr(exc)[:300]}
 
+    try:
+        from app.worker_heartbeat import aggregate as _worker_agg
+        workers = _worker_agg()
+    except Exception as exc:
+        workers = {"error": repr(exc)[:300]}
+
     if not db_ok:
         status = "unhealthy"
     else:
@@ -132,13 +138,20 @@ async def health_deep():
                 and (secs_val is None or secs_val <= tick_threshold)
             )
         )
-        status = "ok" if reaper_fresh else "degraded"
+        # If platform-agent workers are registered, factor their health in.
+        # No registrations (POLIS_PLATFORM_AGENT_ENABLED != 1) -> ignore.
+        if isinstance(workers, dict) and workers.get("any_registered"):
+            workers_fresh = bool(workers.get("all_fresh"))
+        else:
+            workers_fresh = True
+        status = "ok" if (reaper_fresh and workers_fresh) else "degraded"
 
     return {
         "status": status,
         "version": "1.0.0",
         "db": {"ok": db_ok, "latency_ms": db_latency_ms, "error": db_error},
         "reaper": reaper,
+        "workers": workers,
     }
 
 

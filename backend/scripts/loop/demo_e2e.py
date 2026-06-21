@@ -67,6 +67,25 @@ def fail(msg):
     sys.exit(1)
 
 
+FALLBACK_MARKERS = ("llm call failed", "调用 llm 失败", "[demo-bot]", "demo-bot handled")
+
+
+def detect_fallback_artifact(detail):
+    """Return the offending content snippet if the artifact looks like a
+    platform-agent LLM-failure fallback, else None.
+    Used in watch phase to FAIL FAST on env misconfiguration (e.g.
+    LLM_BASE pointing at a 503 relay) instead of waiting for the full
+    timeout window."""
+    artifacts = detail.get("artifacts") or []
+    if not artifacts:
+        return None
+    content = (artifacts[0].get("content") or "").lower()
+    for marker in FALLBACK_MARKERS:
+        if marker in content:
+            return content[:200]
+    return None
+
+
 def assert_real_artifact(job, task):
     artifacts = job.get("artifacts") or []
     if not artifacts:
@@ -76,7 +95,7 @@ def assert_real_artifact(job, task):
     if len(content) < 40:
         fail(f"{task['title']}: artifact too short: {content!r}")
     lowered = content.lower()
-    for marker in ("llm call failed", "调用 llm 失败", "[demo-bot]", "demo-bot handled"):
+    for marker in FALLBACK_MARKERS:
         if marker in lowered:
             fail(f"{task['title']}: fake/failure marker {marker!r}: {content[:200]!r}")
     missing = [needle for needle in task["checks"] if needle not in lowered]
@@ -142,6 +161,15 @@ def main():
             status = detail["status"]
             print(f"[demo-e2e] {job['task']['skill']} {job['id'][:8]} status={status}")
             if status == "completed":
+                snippet = detect_fallback_artifact(detail)
+                if snippet:
+                    fail(
+                        f"{job['task']['title']}: fallback/error artifact "
+                        f"detected mid-run: {snippet!r}. "
+                        f"This usually means the platform agent's LLM call "
+                        f"is failing (check LLM_BASE/LLM_KEY env on the "
+                        f"backend host)."
+                    )
                 details[job["id"]] = detail
                 remaining.remove(job["id"])
             elif status in ("failed", "canceled"):

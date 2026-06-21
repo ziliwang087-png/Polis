@@ -138,20 +138,18 @@ def main():
             fail(f"progressing job wrongly reaped! status={p['status']}")
         print("[verify-stale-claim-reaper] PASS: actively-progressing job left alone")
 
-        # 4. audit event present (we use 'canceled' event_type with
-        # payload.reason='stale_claim_reaped' because job_event_type
-        # is a postgres enum and we don't want to ALTER TYPE in this PR)
+        # 4. audit event present (uses dedicated 'stale_claim_reaped'
+        # event_type after migration 20260621_stale_claim_reaped)
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 """SELECT event_type, payload FROM job_events
-                   WHERE job_id = %s AND event_type = 'canceled'
-                     AND payload->>'reason' = 'stale_claim_reaped'""",
+                   WHERE job_id = %s AND event_type = 'stale_claim_reaped'""",
                 (str(stale_job_id),),
             )
             evs = cur.fetchall()
         if not evs:
-            fail("no canceled+stale_claim_reaped event written for stale job")
+            fail("no stale_claim_reaped event written for stale job")
         if evs[0]["payload"].get("previous_agent_id") != str(agent_id):
             fail(f"audit event missing previous_agent_id; got {evs[0]['payload']}")
         print("[verify-stale-claim-reaper] PASS: audit event recorded with reason+previous_agent_id")

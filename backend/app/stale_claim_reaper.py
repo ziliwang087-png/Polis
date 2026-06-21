@@ -14,7 +14,8 @@ A claim is considered stale when:
 When stale, the reaper:
   - sets status='submitted', clears to_agent_id/claimed_at/started_at/progress
   - inserts a `stale_claim_reaped` job event with the previous agent's id
-    so the audit trail stays intact
+    so the audit trail stays intact (event_type=stale_claim_reaped,
+    added in migration 20260621_stale_claim_reaped)
 
 Tunable via env:
   - POLIS_STALE_CLAIM_REAPER_ENABLED: '1' to enable (default '1')
@@ -90,7 +91,7 @@ def reap_once() -> int:
             cur.execute(
                 """
                 INSERT INTO job_events (job_id, event_type, payload)
-                VALUES (%s, 'canceled', %s::jsonb)
+                VALUES (%s, 'stale_claim_reaped', %s::jsonb)
                 """,
                 (
                     row["id"],

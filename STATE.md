@@ -1,8 +1,8 @@
 # Polis v1 — STATE
 
-> 最后更新：2026-06-20 22:30 AEST
+> 最后更新：2026-06-21 19:46 AEST
 > 状态文件由 JARVIS 维护；动态进度看 docs/progress.md。
-> v1.1：注册 Agent 表单为非开发者简化（chip 选技能，webhook 折叠），公网部署中。
+> v1.1 之后已 Railway+Vercel 公网上线 + L1-L22 22 轮 loop 加固（admin auth、reaper 竞态、worker 心跳、demo cleanup）。
 
 ## 一句话
 
@@ -27,7 +27,12 @@
 
 ## 当前阶段
 
-**V1 MVP 联调通过**。后端 + 前端 + 数据库三层端到端真实流程已跑通；尚未部署，本地双服务运行。
+**V1 已公网上线 + 持续加固中**。后端在 Railway，前端在 Vercel，DB 在 Supabase Singapore。L1-L22 22 轮 loop 已闭环：admin auth、stale-claim reaper、worker heartbeat、cleanup cron、prod e2e 真 LLM artifact。pytest 47/47 stable baseline。
+
+prod 健康基线（2026-06-21 19:46 AEST）：
+- `/health/deep` → status=ok，db ping ~1.5s，reaper running tick=60s，2 platform-agent worker connected+fresh+keepalives 计数自增
+- `/admin/workers` 鉴权工作（401/403/200 三种 case 已验）
+- 真 e2e（fizzbuzz/翻译/PRD/code review/research）5/5 PASS
 
 ## 路径与凭据
 
@@ -111,7 +116,9 @@ OpenAPI 契约：`shared/openapi.json`（48KB，2001 行）。
 - 没接 GitHub OAuth，只 email + password
 - Supabase Storage bucket `polis-attachments` 没建（附件上传会 fail）
 - Frontend 类型当前是手写，待 codegen：`cd frontend && npx openapi-typescript ../shared/openapi.json -o lib/api/types.ts`
-- 没部署，没接 CI
+- inbox SSE 长连接 60s reaper tick → 60s 内最坏延迟，没接 PG LISTEN/NOTIFY 实时桥
+- frontend 没有 `/admin/reaper` & `/admin/workers` 仪表板（API 已就绪，等接）
+- BYOK 端到端只用过中转站（aiprox），未试官方 OpenAI/DeepSeek 直连
 
 ## v1 边界（按计划严格守）
 
@@ -120,11 +127,13 @@ OpenAPI 契约：`shared/openapi.json`（48KB，2001 行）。
 
 ## 下一步候选
 
-1. 接 OAuth（GitHub / 飞书）
-2. 建 Supabase storage bucket，验附件上传
-3. 真把一个 Hermes agent 注册进去跑一单（不靠 mock）
-4. 部署（Vercel + Render / Fly.io）
-5. v1.5 polis-cli（agent 自动 register + heartbeat）
+1. PG LISTEN/NOTIFY 实时桥（消除 60s reaper tick 最坏延迟）
+2. frontend `/admin/reaper` & `/admin/workers` 仪表板（API 已就绪）
+3. BYOK 真官方 key 端到端（不走中转站）
+4. 接 GitHub OAuth（v1 只有 email+password）
+5. 建 Supabase storage bucket `polis-attachments`，验附件上传
+6. v1.5 polis-cli（agent 自动 register + heartbeat）
+7. dead-letter：失败 N 次的 job 自动 stuck 不再无限轮回
 
 ## 团队 / 派单
 

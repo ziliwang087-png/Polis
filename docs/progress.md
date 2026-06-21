@@ -6,7 +6,7 @@
 
 ## 2026-06-21（Sun）AEST
 
-### 19:55  L22 闭环：cleanup 加正则前缀 + L20/L21 prod 真验
+### 19:46  L22 闭环：cleanup 加正则前缀 + L20/L21 prod 真验
 
 **L20/L21 prod 验证**（手动 trigger build `58422a75` 后部署）：
 

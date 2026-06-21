@@ -6,6 +6,60 @@
 
 ## 2026-06-21（Sun）AEST
 
+### 18:30  L20 闭环：/admin/workers admin endpoint + L19 prod 真验
+
+接 L19 worker 心跳基础设施，加 admin-only 端点供 ops（cron / 飞书每日摘要）拉详情。
+
+**新端点**：`GET /api/v1/admin/workers`（`get_current_admin` 鉴权）
+
+返回 `total / fresh / connected / all_fresh / any_registered + workers[]`，每个 worker 含 name / agent_id / jobs_received / jobs_done / errors / last_error / is_fresh / seconds_since_last_seen。等价于 `/health/deep.workers` 但是 admin-only，可以装更多敏感字段（last_error 不脱敏，last_job_id 等）。
+
+**顺手修了一个 bug**：`verify_reaper_admin_api.py` 的 `--base` 默认值还是早上误用过的 `polis-production.up.railway.app`，改成正确的 `polis-backend-production.up.railway.app`。
+
+**L19 prod 真验**（commit 827f55d 已上线）：
+
+```
+$ curl https://polis-backend-production.up.railway.app/health/deep
+status: ok
+workers.total=2 fresh=2 connected=2 all_fresh=true any_registered=true
+  polis-platform-py        agent=f6527096... connected=true is_fresh=true
+  polis-platform-translator agent=e0d684ed... connected=true is_fresh=true
+```
+
+两个 platform-agent worker 都已 register 心跳并 SSE 连上 inbox。注意：当前心跳只在连接事件 / job 事件触发，长连接静默期 `seconds_since_last_seen` 会持续增长——所以默认 freshness 阈值 600s 已是缓解；后续可加定时 keepalive tick（候选 L21+）。
+
+**本地 4/4 PASS**：
+```
+verify_admin_workers_api.py:
+  registered fresh user
+  /admin/workers admin token: total=0 fresh=0 ... any_registered=False (本地无 platform-agent)
+  no token → 401
+  user (non-admin) token → 403
+verify_reaper_admin_api.py: ALL CHECKS PASSED (no regression)
+pytest tests/: 47 passed
+```
+
+### 18:05  L19 闭环：platform-agent worker 心跳进 /health/deep
+
+接 L13 (`/health/deep`) + L15 (`/admin/reaper/*`) 的运维线，给 platform-agent 的 worker 线程加心跳，让 ops 一眼能看到 worker 死没死、连没连、收没收任务、跑没跑成。
+
+- 新增 `backend/app/worker_heartbeat.py` —— 内存线程安全 registry。`register / beat_connected / beat_disconnected / beat_job_received / beat_job_done / beat_error / snapshot / aggregate`，纯 stdlib，读路径不抛异常。
+- `backend/app/platform_agent.py::_worker_loop` 五处打卡：注册→连上 inbox→收到 job→交付完成→断连/异常。
+- `/health/deep` 加 `workers` 段：返回每个 worker 的 `last_seen_at / connected / jobs_done / jobs_received / errors / is_fresh / seconds_since_last_seen`。任意一个 registered worker 超过 `POLIS_WORKER_FRESHNESS_SECS`（默认 600s）没心跳就把整体 status 降为 `degraded`。没 worker 注册（POLIS_PLATFORM_AGENT_ENABLED≠1）保持原行为。
+- 评估器 `verify_worker_heartbeat.py` 三场景：no-workers / fresh / stale。注意修了一个**模块缓存的坑**——TestClient 跨 scenario reload 必须连 `app` 父包一起从 `sys.modules` 清掉，不然 `from app.worker_heartbeat import aggregate` 拿到的是不同的模块对象。
+
+证据：
+
+```
+verify_worker_heartbeat.py: 3/3 PASS
+  scenario_no_workers: any_registered=False, status=ok
+  scenario_fresh_worker: all_fresh=True jobs_done=1
+  scenario_stale_worker: all_fresh=False status=degraded
+pytest tests/: 47 passed
+```
+
+commit `827f55d`，已 push origin/main，触发 Railway 自动 build。
+
 ### 16:50  L18 闭环：codex 独立 review 找出的 4 个真问题已修
 
 让 codex CLI 在隔离上下文里 review L9–L16 改动。codex 给 **FIX-NEEDED**，列了 6 项:

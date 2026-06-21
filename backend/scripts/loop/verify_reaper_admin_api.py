@@ -44,7 +44,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base",
-        default="https://polis-production.up.railway.app/api/v1",
+        default="https://polis-backend-production.up.railway.app/api/v1",
         help="API base url including /api/v1",
     )
     args = parser.parse_args()

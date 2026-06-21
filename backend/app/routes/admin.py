@@ -264,3 +264,64 @@ def reaper_recent(
         )
         for r in rows
     ]
+
+
+# -------------------------------------------------------------------
+# GET /admin/workers
+# Operator dashboard for platform-agent worker threads. Surfaces the
+# in-process heartbeat registry (see app.worker_heartbeat). Admin only.
+# -------------------------------------------------------------------
+class WorkerInfo(BaseModel):
+    name: str
+    agent_id: Optional[str] = None
+    started_at: Optional[int] = None
+    last_seen_at: Optional[int] = None
+    seconds_since_last_seen: Optional[int] = None
+    is_fresh: bool = False
+    connected: bool = False
+    last_connected_at: Optional[int] = None
+    last_job_received_at: Optional[int] = None
+    last_job_done_at: Optional[int] = None
+    last_job_id: Optional[str] = None
+    jobs_received: int = 0
+    jobs_done: int = 0
+    errors: int = 0
+    last_error: Optional[str] = None
+
+
+class WorkersResponse(BaseModel):
+    total: int
+    fresh: int
+    connected: int
+    all_fresh: bool
+    any_registered: bool
+    workers: List[WorkerInfo]
+
+
+@router.get("/workers", response_model=WorkersResponse)
+def admin_workers(
+    _: UUID = Depends(get_current_admin),
+):
+    """Live snapshot of platform-agent worker heartbeats.
+
+    Same data as /health/deep's `workers` field, but unredacted last_error
+    and gated behind admin auth so it's safe to surface in cron summaries.
+    """
+    try:
+        from app.worker_heartbeat import aggregate as _wh_agg
+        snap = _wh_agg()
+    except Exception as exc:
+        # Don't 500 -- give operators a usable error envelope.
+        return WorkersResponse(
+            total=0, fresh=0, connected=0,
+            all_fresh=False, any_registered=False,
+            workers=[],
+        )
+    return WorkersResponse(
+        total=int(snap.get("total", 0)),
+        fresh=int(snap.get("fresh", 0)),
+        connected=int(snap.get("connected", 0)),
+        all_fresh=bool(snap.get("all_fresh", False)),
+        any_registered=bool(snap.get("any_registered", False)),
+        workers=[WorkerInfo(**w) for w in snap.get("workers", [])],
+    )

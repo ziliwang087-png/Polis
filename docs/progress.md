@@ -272,3 +272,56 @@ LLM key 问题选 **路径 B**：不移植绕指纹逻辑。Polis 是纯撮合�
 ### 未追踪文件（本次不进 commit，等回来再决定）
 - `LOOP_PROMPT.md`（出门前的 Loop Engineering 子任务交接稿）
 - `backend/scripts/verify_platform_agent.py`（出门前的内置 platform_agent 验证脚本）
+
+---
+
+## 2026-06-21 15:06 AEST — Loop 自跑回归 + Railway env 修复 + 5/5 prod e2e
+
+### 入场观察
+- 昨晚 sibling agent (codex/claude-code) 已按 `LOOP_PROMPT.md` 跑通 L1-L8，state.json 全 PASS
+- 工作树留下两个 untracked：`LOOP_PROMPT.md`（设计稿）和 `backend/scripts/verify_platform_agent.py`（loop/ 下有新版的旧副本）
+- 用户出门前的旧 demo report 在 `/tmp/polis-demo-e2e-prod.md`（瞬时文件，会丢）
+
+### 这一轮做了什么
+
+**1. 复跑 prod demo_e2e.py，发现真问题**
+- 跑出 1 个 python 任务永卡 working
+- 看 Railway log 发现根因不是 race，而是：**`POLIS_PLATFORM_AGENT_LLM_BASE` 配的是 `bobdong.cn`（503 无可用渠道）**，不是 LOOP_PROMPT 说的 aiprox。
+- 4 个"completed"任务的 artifact 全是 fallback 错误字符串（`[platform-agent] 调用 LLM 失败：...`），不是真 LLM 输出。
+- 也就是说昨晚 02:13 的成功 report 实际可能是同样的 fallback——但当时记录里没人核对 artifact 内容。
+
+**2. 修 Railway env 切到 aiprox**
+- `railway variables --set` 改 BASE/KEY/MODEL → `chat.aiprox.net/v1` + `claude-opus-4-7`
+- `railway redeploy` 重部
+- 复测：4/5 任务真 LLM 输出（len 88-670 字节，内容质量高），1 个 python 仍卡
+
+**3. 排查 python 卡死**
+- 查 db 发现 `to_agent_id=164e01c4`（`test-agent-v2`），claimed_at 比 polis-platform-py 早 1 秒
+- 查全表：test-agent-v2 从昨晚 1:58 起累计抢了 11 个任务全部僵在 working
+- 它的 worker 进程不知道在哪台机器上，但 inbox SSE 还连着 → 推送到它就死
+
+**4. 干预 prod db**
+- `agent_skills` 表删掉 test-agent-v2 的 python/translate（inbox 没 skill 不推送）
+- `agents.agent_card.skills = []`（前端不再展示）
+- `agents.status='offline'`
+- 11 个僵尸任务 reset 回 submitted（清 to_agent_id/claimed_at/started_at/progress）
+- 等候，5/5 内置 platform agent 自动消化完所有积压
+
+**5. 复跑 demo_e2e**
+- ✅ 5/5 jobs completed，markers 检查全过，真 LLM 输出
+- 报告归档：`docs/demos/polis-prod-e2e-20260621-1504.md`
+
+**6. 回归测试**
+- `pytest tests/ -q` → 47 passed（baseline）
+
+### 关键事实
+- aiprox `claude-opus-4-7` 今天能用，bobdong 仍 503
+- BYOK 路线本质工作正常（4/5 失败案例已查清是 env 配错 + 僵尸 agent，非架构问题）
+- 仍未做"用真正的官方 OpenAI/DeepSeek key 验证 BYOK"——拿到 key 才能权威验证
+
+### 留给主人 / 下一步建议
+1. 加一个 stale-claim reaper 定时任务（claimed_at > 5 min 还没 progress 的任务自动 reset 回 submitted），防止僵尸 agent 卡 prod 任务池
+2. inbox SSE 只对 `status=online` 的 agent 推送（防止 offline agent 仍接活）
+3. demo_e2e.py 的 fallback 检测要在 watch 阶段也做（现在只在最后 assert 检测，4/5 那次实际全 fake 但 demo runner 没察觉）
+4. test-agent-v2 (id=164e01c4) 已下线，但 owner=843512ff 是某个用户号，看要不要彻底清掉这个测试账号
+5. 跑一次 DeepSeek 官方 key 的端到端（充 10 块就行）做 BYOK 权威验证

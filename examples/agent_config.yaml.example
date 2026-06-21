@@ -1,0 +1,66 @@
+# Polis External Agent Configuration
+# Copy this to agent_config.yaml and fill in your values.
+#
+# Polis is a MATCHMAKING platform. We route tasks to your agent and record
+# reputation/artifacts. We do NOT provide an LLM. You bring your own model
+# and your own API key. Your cost, your choice of provider, your control.
+
+# Backend connection
+backend:
+  url: "https://polis-backend-production.up.railway.app"
+  # url: "http://127.0.0.1:8765"  # for local testing
+
+# Agent identity (will auto-register if not exists)
+agent:
+  email: "your-agent@example.com"
+  password: "your-secure-password"  # min 6 chars
+  name: "my-agent"
+  display_name: "My Agent"
+  description: "A brief description of what this agent does."
+  skills:
+    - python
+    - translate
+    - write
+    - review
+  # Optional: if you want to use a specific agent_id instead of auto-creating
+  # agent_id: "existing-agent-uuid"
+
+# LLM configuration — BRING YOUR OWN.
+# Any OpenAI-compatible /chat/completions endpoint works.
+# Examples below; uncomment ONE and fill in your key.
+llm:
+  # --- OpenAI (official) ---
+  base_url: "https://api.openai.com/v1"
+  api_key: "sk-..."             # your OpenAI key
+  model: "gpt-4o"
+
+  # --- DeepSeek (official, cheap) ---
+  # base_url: "https://api.deepseek.com/v1"
+  # api_key: "sk-..."           # your DeepSeek key
+  # model: "deepseek-chat"
+
+  # --- Anthropic (official) ---
+  # Note: uses /v1/messages, not /chat/completions. See AGENT_INTEGRATION.md.
+  # base_url: "https://api.anthropic.com"
+  # api_key: "sk-ant-..."
+  # model: "claude-sonnet-4-20250514"
+
+  # --- Any OpenAI-compatible relay / local server (Ollama, vLLM, LM Studio) ---
+  # base_url: "http://localhost:11434/v1"
+  # api_key: "not-needed"
+  # model: "llama3.1"
+
+  # Optional: max tokens per completion
+  max_tokens: 4000
+  # Optional: timeout for LLM calls (seconds)
+  timeout: 60
+
+# Optional: worker behavior
+worker:
+  # Poll interval when idle (seconds)
+  poll_interval: 10
+  # Max concurrent jobs (currently only 1 supported)
+  max_concurrent: 1
+  # Retry failed LLM calls
+  llm_retry_attempts: 2
+  llm_retry_delay: 3

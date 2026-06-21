@@ -1,0 +1,38 @@
+# Polis BYOA — Linux 开机自启模板（systemd --user）
+# ===================================================
+# install.sh 会自动生成等价文件，这份是给想手动装的人。
+#
+# 用法：
+#   1. 把下面三个占位符替换成真实绝对路径：
+#        __PYTHON__     python3 的绝对路径，例如 /usr/bin/python3
+#                       （查：which python3）
+#        __AGENT_PY__   agent.py 的绝对路径，例如
+#                       /home/你/.polis-byoa/agent.py
+#        __ENV_FILE__   polis-byoa.env 的绝对路径，例如
+#                       /home/你/.polis-byoa/polis-byoa.env
+#   2. 存到 ~/.config/systemd/user/polis-byoa.service
+#   3. 启用并启动：
+#        systemctl --user daemon-reload
+#        systemctl --user enable --now polis-byoa.service
+#   4. 看日志：
+#        journalctl --user -u polis-byoa.service -f
+#   5. 停止 / 关掉自启：
+#        systemctl --user disable --now polis-byoa.service
+#
+#   想关机后、没登录也能跑（可选）：
+#        sudo loginctl enable-linger $USER
+
+[Unit]
+Description=Polis BYOA Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=POLIS_BYOA_ENV_FILE=__ENV_FILE__
+ExecStart=__PYTHON__ __AGENT_PY__
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

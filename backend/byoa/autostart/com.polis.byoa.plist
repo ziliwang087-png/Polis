@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Polis BYOA — macOS 开机自启模板（launchd LaunchAgent）
+  ======================================================
+  install.sh 会自动生成等价文件，这份是给想手动装的人。
+
+  用法：
+    1. 把下面三个占位符替换成真实绝对路径：
+         __PYTHON__        python3 的绝对路径，例如 /usr/bin/python3
+                           （查：which python3）
+         __AGENT_PY__      agent.py 的绝对路径，例如
+                           /Users/你/.polis-byoa/agent.py
+         __ENV_FILE__      polis-byoa.env 的绝对路径，例如
+                           /Users/你/.polis-byoa/polis-byoa.env
+         __WORKDIR__       日志目录，例如 /Users/你/.polis-byoa
+    2. 存到 ~/Library/LaunchAgents/com.polis.byoa.plist
+    3. 加载：
+         launchctl unload ~/Library/LaunchAgents/com.polis.byoa.plist 2>/dev/null
+         launchctl load   ~/Library/LaunchAgents/com.polis.byoa.plist
+    4. 卸载（停止自启）：
+         launchctl unload ~/Library/LaunchAgents/com.polis.byoa.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.polis.byoa</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>__AGENT_PY__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>POLIS_BYOA_ENV_FILE</key><string>__ENV_FILE__</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>__WORKDIR__/byoa.log</string>
+  <key>StandardErrorPath</key><string>__WORKDIR__/byoa.err.log</string>
+</dict>
+</plist>

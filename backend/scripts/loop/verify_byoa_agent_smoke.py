@@ -85,7 +85,8 @@ def t4_resolve_missing_field_exits():
         agent._resolve_config()
     except SystemExit as e:
         msg = str(e)
-        assert "缺少必要配置" in msg, msg
+        # Claude 版本用 "缺少配置"，旧版本用 "缺少必要配置"
+        assert ("缺少配置" in msg) or ("缺少必要配置" in msg), msg
         print("[L25] PASS: T4 missing fields → SystemExit with Chinese message")
         return
     raise AssertionError("expected SystemExit, got success")
@@ -94,15 +95,17 @@ def t4_resolve_missing_field_exits():
 def t5_humanize_llm_error():
     e401 = urllib.error.HTTPError("u", 401, "Unauthorized", {}, io.BytesIO(b"bad key"))
     msg401 = agent._humanize_llm_error(e401)
-    assert "LLM Key 不对" in msg401, msg401
+    # Claude: "LLM key 无效或已过期", 旧版: "LLM Key 不对"
+    assert ("无效" in msg401 or "不对" in msg401), msg401
 
     e429 = urllib.error.HTTPError("u", 429, "Too Many", {}, io.BytesIO(b""))
     msg429 = agent._humanize_llm_error(e429)
-    assert "太频繁" in msg429, msg429
+    # Claude: "限流", 旧版: "太频繁"
+    assert ("限流" in msg429 or "频繁" in msg429), msg429
 
     eurl = urllib.error.URLError("Name or service not known")
     msg_dns = agent._humanize_llm_error(eurl)
-    assert "DNS" in msg_dns or "解析" in msg_dns, msg_dns
+    assert ("DNS" in msg_dns or "解析" in msg_dns), msg_dns
 
     print("[L25] PASS: T5 humanize_llm_error returns Chinese for 401/429/DNS")
 

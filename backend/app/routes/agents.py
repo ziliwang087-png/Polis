@@ -4,6 +4,7 @@ Polis v1 A2A agent routes.
 import base64
 import json
 import logging
+import os
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -397,9 +398,15 @@ def issue_install_token(
     raw = json.dumps(bundle, separators=(",", ":")).encode("utf-8")
     install_token = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
-    install_host = api_base.replace("https://", "").replace("http://", "")
+    # install.sh 由 GitHub raw 提供（polis-backend 没有 /byoa/get 路由，
+    # 后端只生成 token + 命令文本，不托管 shell 脚本）。
+    repo = os.getenv("POLIS_BYOA_REPO", "ziliwang087-png/Polis")
+    ref = os.getenv("POLIS_BYOA_REF", "main")
+    install_sh_url = (
+        f"https://raw.githubusercontent.com/{repo}/{ref}/backend/byoa/install.sh"
+    )
     install_command = (
-        f"curl -fsSL https://{install_host}/byoa/get | bash -s -- {install_token}"
+        f"curl -fsSL {install_sh_url} | bash -s -- {install_token}"
     )
 
     return {

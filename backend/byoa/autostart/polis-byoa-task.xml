@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Polis BYOA — Windows 开机自启模板（任务计划程序 Task Scheduler）
+  ================================================================
+  install.sh 不会自动装 Windows 自启，这份模板给 Windows 用户手动导入。
+
+  用法（任选其一）：
+
+  【方式 A：双击 register-windows.bat 自动注册（推荐）】
+    autostart/ 目录里的 register-windows.bat 会替你填好路径并注册，
+    不用手动改这个 XML。
+
+  【方式 B：手动改 XML + schtasks 导入】
+    1. 把下面占位符替换成真实绝对路径（用 Windows 反斜杠路径）：
+         __PYTHON__     pythonw.exe 的绝对路径，例如
+                        C:\Users\你\AppData\Local\Programs\Python\Python311\pythonw.exe
+                        （用 pythonw.exe 不弹黑窗；没有就用 python.exe）
+         __AGENT_PY__   agent.py 的绝对路径，例如
+                        C:\Users\你\.polis-byoa\agent.py
+         __ENV_FILE__   polis-byoa.env 的绝对路径，例如
+                        C:\Users\你\.polis-byoa\polis-byoa.env
+         __USERID__     你的 Windows 账户，例如 你的电脑名\你的用户名
+                        （查：命令行里跑 whoami）
+    2. 用管理员命令行导入：
+         schtasks /Create /TN "PolisBYOA" /XML "完整路径\polis-byoa-task.xml"
+    3. 立即启动一次（不用等下次开机）：
+         schtasks /Run /TN "PolisBYOA"
+    4. 看状态：
+         schtasks /Query /TN "PolisBYOA" /V /FO LIST
+    5. 删除（停止自启）：
+         schtasks /Delete /TN "PolisBYOA" /F
+
+  说明：
+    - 触发器为「登录时启动」，登录后自动拉起 agent。
+    - pythonw.exe 无窗口运行；日志看 %USERPROFILE%\.polis-byoa\byoa.log
+      （需在 agent 启动时把 stdout/stderr 重定向，或直接看后端 agent 状态）。
+    - POLIS_BYOA_ENV_FILE 通过命令行参数传不进 agent，这里用
+      cmd /c set 环境变量再启动的方式注入。
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Polis BYOA Agent — 登录时自动运行</Description>
+    <URI>\PolisBYOA</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>__USERID__</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>__USERID__</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>9999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <Arguments>/c set "POLIS_BYOA_ENV_FILE=__ENV_FILE__" &amp;&amp; "__PYTHON__" "__AGENT_PY__"</Arguments>
+    </Exec>
+  </Actions>
+</Task>

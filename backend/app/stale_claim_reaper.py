@@ -111,17 +111,58 @@ def reap_once() -> int:
 
 _running_task: Optional[asyncio.Task] = None
 
+# Public, read-only state for /health/deep
+_state: dict = {
+    "enabled": False,
+    "running": False,
+    "tick_secs": _env_int("POLIS_STALE_CLAIM_TICK_SECS", 60),
+    "age_secs": _env_int("POLIS_STALE_CLAIM_AGE_SECS", 300),
+    "last_tick_at": None,         # epoch seconds
+    "last_reap_count": 0,
+    "total_reaped": 0,
+    "tick_errors": 0,
+    "last_error": None,
+    "started_at": None,
+}
+
+
+def get_state() -> dict:
+    """Snapshot reaper state. Used by /health/deep."""
+    import time as _t
+    snap = dict(_state)
+    if snap.get("last_tick_at"):
+        snap["seconds_since_last_tick"] = max(0, int(_t.time() - snap["last_tick_at"]))
+    else:
+        snap["seconds_since_last_tick"] = None
+    return snap
+
 
 async def _reaper_loop():
+    import time as _t
     tick = _env_int("POLIS_STALE_CLAIM_TICK_SECS", 60)
-    logger.info("[stale-claim-reaper] loop started, tick=%ds, age=%ds",
-                tick, _env_int("POLIS_STALE_CLAIM_AGE_SECS", 300))
-    while True:
-        try:
-            reap_once()
-        except Exception:
-            logger.exception("[stale-claim-reaper] tick failed (will retry)")
-        await asyncio.sleep(tick)
+    age = _env_int("POLIS_STALE_CLAIM_AGE_SECS", 300)
+    _state.update(
+        running=True,
+        tick_secs=tick,
+        age_secs=age,
+        started_at=int(_t.time()),
+    )
+    logger.info("[stale-claim-reaper] loop started, tick=%ds, age=%ds", tick, age)
+    try:
+        while True:
+            try:
+                count = reap_once()
+                _state["last_tick_at"] = int(_t.time())
+                _state["last_reap_count"] = count
+                _state["total_reaped"] += count
+                _state["last_error"] = None
+            except Exception as exc:
+                _state["tick_errors"] += 1
+                _state["last_error"] = repr(exc)[:300]
+                logger.exception("[stale-claim-reaper] tick failed (will retry)")
+            await asyncio.sleep(tick)
+    finally:
+        _state["running"] = False
 
 
 def maybe_start_reaper():
@@ -132,8 +173,10 @@ def maybe_start_reaper():
     """
     global _running_task
     if os.getenv("POLIS_STALE_CLAIM_REAPER_ENABLED", "1") != "1":
+        _state["enabled"] = False
         logger.info("[stale-claim-reaper] disabled via env")
         return
+    _state["enabled"] = True
     if _running_task is not None and not _running_task.done():
         logger.info("[stale-claim-reaper] already running, skip")
         return

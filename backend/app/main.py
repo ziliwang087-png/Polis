@@ -2,9 +2,11 @@
 Polis Backend API
 Main application entry point
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import time
 
 from app.config import settings
 from app.database import get_db_connection
@@ -16,31 +18,39 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version="1.0.0",
-    description="A2A-compatible task network for Chinese-speaking AI engineers"
-)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown for background workers.
 
-@app.on_event("startup")
-def _start_platform_agent():
-    """启动平台内置 agent（如果环境变量配齐了）。失败不影响 web 服务。"""
+    Runs both hooks; either failing must not stop the web service.
+    """
+    log = logging.getLogger("polis")
+
+    # Platform agent (sync init returning quickly; spawns its own threads).
     try:
         from app.platform_agent import maybe_start_platform_agent
         maybe_start_platform_agent()
     except Exception:
-        logging.getLogger("polis").exception("platform-agent startup hook crashed")
+        log.exception("platform-agent startup hook crashed")
 
-
-@app.on_event("startup")
-async def _start_stale_claim_reaper():
-    """启动僵尸 claim 清理后台任务。失败不影响 web 服务。"""
+    # Stale-claim reaper (asyncio Task on running loop).
     try:
         from app.stale_claim_reaper import maybe_start_reaper
         maybe_start_reaper()
     except Exception:
-        logging.getLogger("polis").exception("stale-claim-reaper startup hook crashed")
+        log.exception("stale-claim-reaper startup hook crashed")
+
+    yield
+    # No teardown for now; daemon threads + asyncio loop teardown is fine.
+
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version="1.0.0",
+    description="A2A-compatible task network for Chinese-speaking AI engineers",
+    lifespan=lifespan,
+)
 
 
 # CORS middleware
@@ -70,6 +80,65 @@ def root():
 def health():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.get("/health/deep")
+def health_deep():
+    """Deep health: db ping + reaper state.
+
+    Status semantics:
+      ok      — db reachable, reaper enabled+running with recent tick
+      degraded — anything off (db slow, reaper not ticking, etc.)
+      unhealthy — db unreachable
+    """
+    db_ok = True
+    db_latency_ms = None
+    db_error = None
+    t0 = time.perf_counter()
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        db_latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+    except Exception as exc:
+        db_ok = False
+        db_error = repr(exc)[:300]
+
+    try:
+        from app.stale_claim_reaper import get_state as _reaper_state
+        reaper = _reaper_state()
+    except Exception as exc:
+        reaper = {"error": repr(exc)[:300]}
+
+    if not db_ok:
+        status = "unhealthy"
+    else:
+        # tick fresh? allow up to 3x tick before degraded.
+        try:
+            tick_threshold = int(reaper.get("tick_secs") or 60) * 3
+        except (TypeError, ValueError):
+            tick_threshold = 180
+        secs_raw = reaper.get("seconds_since_last_tick")
+        try:
+            secs_val = int(secs_raw) if secs_raw is not None else None
+        except (TypeError, ValueError):
+            secs_val = None
+        reaper_fresh = (
+            reaper.get("enabled") is False  # disabled is fine
+            or (
+                reaper.get("running")
+                and (secs_val is None or secs_val <= tick_threshold)
+            )
+        )
+        status = "ok" if reaper_fresh else "degraded"
+
+    return {
+        "status": status,
+        "version": "1.0.0",
+        "db": {"ok": db_ok, "latency_ms": db_latency_ms, "error": db_error},
+        "reaper": reaper,
+    }
 
 
 @app.get("/.well-known/agent.json", tags=["a2a"])

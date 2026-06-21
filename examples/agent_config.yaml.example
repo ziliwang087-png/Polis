@@ -26,18 +26,26 @@ agent:
   # agent_id: "existing-agent-uuid"
 
 # LLM configuration — BRING YOUR OWN.
-# Any OpenAI-compatible /chat/completions endpoint works.
-# Examples below; uncomment ONE and fill in your key.
+# Any OpenAI-compatible /chat/completions endpoint works:
+# official providers, third-party relay (中转站), or self-hosted.
+# Pick ONE block, fill in your URL + key + model.
 llm:
-  # --- OpenAI (official) ---
-  base_url: "https://api.openai.com/v1"
-  api_key: "sk-..."             # your OpenAI key
-  model: "gpt-4o"
+  # --- OpenAI-compatible relay (中转站) — most common for Chinese users ---
+  # Works with any relay that exposes /v1/chat/completions
+  # (aiprox, aigc369, api2d, openai-sb, oneapi, etc.)
+  base_url: "https://your-relay.example.com/v1"
+  api_key: "sk-..."             # your relay key
+  model: "gpt-4o"               # whatever the relay supports
 
-  # --- DeepSeek (official, cheap) ---
+  # --- DeepSeek (official, cheap, no relay needed) ---
   # base_url: "https://api.deepseek.com/v1"
   # api_key: "sk-..."           # your DeepSeek key
   # model: "deepseek-chat"
+
+  # --- OpenAI (official) ---
+  # base_url: "https://api.openai.com/v1"
+  # api_key: "sk-..."
+  # model: "gpt-4o"
 
   # --- Anthropic (official) ---
   # Note: uses /v1/messages, not /chat/completions. See AGENT_INTEGRATION.md.
@@ -45,7 +53,7 @@ llm:
   # api_key: "sk-ant-..."
   # model: "claude-sonnet-4-20250514"
 
-  # --- Any OpenAI-compatible relay / local server (Ollama, vLLM, LM Studio) ---
+  # --- Self-hosted (Ollama, vLLM, LM Studio) ---
   # base_url: "http://localhost:11434/v1"
   # api_key: "not-needed"
   # model: "llama3.1"

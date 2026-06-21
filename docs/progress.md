@@ -178,3 +178,97 @@
 3. **真注册一个 Hermes agent 进去跑一单** — 不靠 mock 验通联
 4. **部署**（Vercel 前端 + Render/Fly.io 后端） — 拿到公网 URL
 5. **polis-cli v1.5** — agent 自动 register + heartbeat
+
+---
+
+## 2026-06-21 12:22 AEST — 转向真 A2A 路线
+
+### 路线确认（Henry 拍板）
+Polis = **纯撮合平台**，做真正的 A2A。用户上传自己的 agent（带 skills + 自己的 LLM key + 自己在用的模型），
+任务匹配到对应 skill 时由用户自己的 agent 接活。Polis 后端**不碰 LLM、不当二房东**，只做任务路由 + 信誉评分 + artifact 存证。
+内置 platform_agent 仅作冷启动/demo 占位，长期可有可无。
+
+### 本次完成
+- 写了 `examples/demo_agent_v2.py`：配置驱动的外部 agent 接入模板（stdlib only），读 `agent_config.yaml`，
+  自动注册 → 订阅 inbox SSE → claim → progress → 调自己的 LLM → 交付 artifact（带 model/tokens/latency metadata）+ 失败重试
+- 写了 `examples/agent_config.yaml.example`：接入配置模板
+- 写了 `docs/AGENT_INTEGRATION.md`：5 分钟接入文档（含 FAQ、故障排查、多 agent、24/7 部署）
+- `.gitignore` 加 `examples/agent_config.yaml`（防真实 LLM key 入库）
+
+### 验证状态
+- ✅ A2A 协议完全通：外部 agent 能注册/接活/报进度/交付（本地 8765 验证）
+- ✅ 修了 demo_agent_v2.py 一个 bug：progress 接口字段是 `progress` 不是 `status`
+- ❌ **LLM 调用受阻**：Henry 的 6 个中转站 key（bobdong/aiprox/hongxin 等）裸 HTTP 调 `claude-opus-4-8` 全 503/401
+  （"model_not_found"/"no available accounts"/"Invalid token"）。但 **Hermes 主进程能调通 bobdong**——
+  说明 Hermes 用了"订阅令牌绕指纹"那套（MEMORY 有记录：adapter+transports mcp_→mcptool_ + OAuth re.sub）。
+  外部 agent 走标准 OpenAI HTTP 调不通这些特殊组的 key。
+
+### 未决 / 下一步（开新对话从这里继续）
+1. **LLM key 问题**：要么 (A) 把 Hermes 绕指纹逻辑移植到 demo_agent_v2.py；要么 (B) 用一个不需要绕的标准 key
+   （OpenAI 官方 / DeepSeek 官方 / 中转站普通套餐）。Henry 倾向让接入者用自己的标准 key。
+2. **commit 落地**：demo_agent_v2.py + agent_config.yaml.example + AGENT_INTEGRATION.md 还没 commit（工作树 untracked）
+3. codex 昨晚跑完的 L1-L8（platform agent / translator / dynamic skills / rating / demo e2e）已 push 到 main (HEAD=46c503a)
+4. 内置 platform_agent 在 Railway prod 上 LLM 也是 403/503（同 key 问题），但这不影响 A2A 主线
+
+### 关键事实
+- 公网后端：https://polis-backend-production.up.railway.app
+- 公网前端：https://polis-frontend-three.vercel.app
+- 本地测试后端：port 8765（scripts/loop/start_backend.sh）
+- 测试账号：alice2@example.com / Alice2Pass-123
+- Henry 的 LLM 中转站全在 ~/.hermes/config.yaml 的 custom_providers（6 个，目前裸 HTTP 都调不通 claude-opus-4-8）
+
+---
+
+## 2026-06-21 12:41 AEST — BYOK 路线落地 + commit
+
+### 决策（Henry 拍板）
+LLM key 问题选 **路径 B**：不移植绕指纹逻辑。Polis 是纯撮合平台，接入者**自带 agent + 自带模型 + 自带 key**，
+我们不提供算力、不当二房东、不存接入者的 LLM key。bobdong 这类需要伪装指纹的特殊中转站不进示例。
+
+### 本次完成（commit 0c28031，已 push origin/main）
+- `examples/agent_config.yaml.example`：改成 4 个标准 provider 示例（OpenAI/DeepSeek/Anthropic 官方/本地 Ollama-vLLM），
+  删掉硬编码的 bobdong key
+- `docs/AGENT_INTEGRATION.md`：明确 "Polis does not give you a model / 自带 key，自己付费" 定位；
+  What You Need 段改成官方 provider 列表
+- `examples/demo_agent_v2.py`：122 行 stdlib worker，首次入库（之前一直 untracked）
+
+### 验证
+- ✅ fetch 确认 push 前 local==remote (46c503a)，无 Henry 并行操作冲突
+- ✅ grep 扫过三个文件无 sk-evp/sk-ant/bobdong.cn 泄露
+- ✅ .gitignore 仍挡住真实 examples/agent_config.yaml
+- ⚠️ 顺手实测了那个 bobdong key：OpenAI 格式和 Anthropic /v1/messages 格式都返 503
+  model_not_found（"No available channel under group CC限时满血特价"）——确认是中转站渠道/分组问题，
+  不是网络。这进一步支持 BYOK 决策：不依赖这类不稳定的特殊中转站。
+
+### 下一步候选
+1. 真拉一个外部 agent 用标准 OpenAI/DeepSeek key 跑通一单（端到端验 BYOK 路线真能用）
+2. 公网前端注册页是否要加 "自带模型" 的提示文案
+3. polis-cli v1.5（agent 自动 register + heartbeat）
+
+---
+
+## 2026-06-21 14:16 AEST — 文档：把"中转站是常态"写进示例
+
+### 背景
+昨天 commit 0c28031 把 `agent_config.yaml.example` 改成"OpenAI/DeepSeek/Anthropic 官方"
+为主，但 Henry 指出 99% 国内接入者用的是中转站，不是官方 key。文档给的第一档默认值
+对国内用户不友好——复制下来还得自己改 base_url。
+
+### 本次改动（无 commit hash 待 push）
+- `examples/agent_config.yaml.example`：把"OpenAI 兼容中转站"提到第一档示例
+  （aiprox/aigc369/api2d/openai-sb/oneapi 等），官方 OpenAI/DeepSeek/Anthropic
+  和自部署退到下面注释项
+- `docs/AGENT_INTEGRATION.md`：
+  - Quickstart 示例 base_url 改成 relay 占位
+  - "What You Need" 段把"第三方中转 (中转站)"列为最常见选项
+  - 加 troubleshooting 提示：relay 401/503 通常是渠道限制（desktop-only/fingerprint-gated），
+    去问 relay 客服，而不是 Polis 的问题
+
+### 立场不变
+- Polis 仍是纯撮合，agent 跑用户机器，key 用户保管
+- 这次只是把"接入者用啥 key"的描述从"以官方为主"改成"中转是常态、官方/自部署也支持"
+- BYOK 端到端实测仍未做（aiprox 今天通了，但中转站 ≠ 普适证明，等真用户接入或拿 DeepSeek 官方 key 验）
+
+### 未追踪文件（本次不进 commit，等回来再决定）
+- `LOOP_PROMPT.md`（出门前的 Loop Engineering 子任务交接稿）
+- `backend/scripts/verify_platform_agent.py`（出门前的内置 platform_agent 验证脚本）

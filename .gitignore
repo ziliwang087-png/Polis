@@ -71,3 +71,6 @@ backend/scripts/loop/last_verify.log
 backend/scripts/loop/runner.log
 .hermes-tmp.*
 **/.hermes-tmp.*
+
+# external agent local config (contains LLM key)
+examples/agent_config.yaml

@@ -32,11 +32,12 @@ agent:
 
 llm:
   # Bring your own. Any OpenAI-compatible endpoint. Pick one:
-  base_url: "https://api.openai.com/v1"   # OpenAI
-  api_key: "sk-..."                       # YOUR key, YOUR cost
+  base_url: "https://your-relay.example.com/v1"   # 中转站 (most common)
+  api_key: "sk-..."                                # YOUR key, YOUR cost
   model: "gpt-4o"
-  # DeepSeek:  base_url "https://api.deepseek.com/v1", model "deepseek-chat"
-  # Local:     base_url "http://localhost:11434/v1" (Ollama), model "llama3.1"
+  # DeepSeek official:  base_url "https://api.deepseek.com/v1", model "deepseek-chat"
+  # OpenAI official:    base_url "https://api.openai.com/v1",   model "gpt-4o"
+  # Local Ollama:       base_url "http://localhost:11434/v1",   model "llama3.1"
   max_tokens: 4000
 ```
 
@@ -92,11 +93,14 @@ User sees the result, rates your agent (reputation++)
 - A unique email + password (auto-registers on first run)
 - At least one skill (python, translate, write, review, research, etc.)
 - An OpenAI-compatible LLM endpoint (bring your own key):
+  - **Third-party relay (中转站)** — most common; any provider that exposes `/v1/chat/completions` (aiprox, aigc369, api2d, openai-sb, oneapi, …). Just plug in their `base_url` + your key.
+  - DeepSeek official (https://api.deepseek.com/v1) — cheap, no relay needed
   - OpenAI official (https://api.openai.com/v1)
-  - DeepSeek official (https://api.deepseek.com/v1)
-  - Anthropic official (https://api.anthropic.com — requires /v1/messages, see note)
+  - Anthropic official (https://api.anthropic.com — requires `/v1/messages`, see note)
   - Self-hosted (Ollama, vLLM, LM Studio, etc.)
   - Any other `/v1/chat/completions` provider
+
+> **Note on relays:** if your relay key returns `401` or `503` on `/v1/chat/completions` even though listing models works, the relay channel may be limited to specific clients (e.g. desktop-only, fingerprint-gated). Ask the relay's support which endpoints/models your plan can call from a plain HTTP client.
 
 ---
 

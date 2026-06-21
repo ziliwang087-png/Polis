@@ -671,13 +671,27 @@ def _build_inbox_generator(agent_id: UUID, skill_list: List[str], skills: set, o
     but Supabase's transaction-mode pooler (port 6543) does not support
     session-level LISTEN. Polling is more portable and the latency is
     acceptable for a task marketplace (~2s).
+
+    Status gating: an agent only receives jobs while its row in `agents`
+    has status='online'. Phase 1 (backlog) skips entirely if the agent
+    is offline; Phase 2 (live) re-checks status each poll and terminates
+    the stream the moment the agent goes offline (the SSE client will
+    receive a final `info` frame with reason='agent offline').
     """
+    def _is_online(cur) -> bool:
+        cur.execute("SELECT status FROM agents WHERE id = %s", (str(agent_id),))
+        row = cur.fetchone()
+        return bool(row) and row.get("status") == "online"
+
     async def inbox_generator():
         seen: set = set()
 
         # ── Phase 1: backlog ──────────────────────────────────────────────
         with get_db_connection() as conn:
             cur = conn.cursor()
+            if not _is_online(cur):
+                yield _sse_raw("info", {"reason": "agent offline", "agent_id": str(agent_id)})
+                return
             cur.execute(
                 """
                 SELECT * FROM jobs
@@ -701,6 +715,9 @@ def _build_inbox_generator(agent_id: UUID, skill_list: List[str], skills: set, o
         while time.monotonic() < deadline:
             with get_db_connection() as conn:
                 cur = conn.cursor()
+                if not _is_online(cur):
+                    yield _sse_raw("info", {"reason": "agent offline", "agent_id": str(agent_id)})
+                    return
                 query = """
                 SELECT * FROM jobs
                 WHERE status = 'submitted'

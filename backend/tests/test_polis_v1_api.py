@@ -195,6 +195,12 @@ class FakeCursor:
             self._rows = [self.store.agents[aid]] if aid in self.store.agents else []
             return
 
+        if compact == "select status from agents where id = %s":
+            aid = uuid.UUID(str(params[0]))
+            row = self.store.agents.get(aid)
+            self._rows = [{"status": row["status"]}] if row else []
+            return
+
         if "select * from agents where owner_id = %s" in compact:
             owner_id = uuid.UUID(str(params[0]))
             self._rows = [row for row in self.store.agents.values() if row["owner_id"] == owner_id]
@@ -788,6 +794,10 @@ def test_agent_inbox_queries_cast_postgres_array_params(polis_client):
     from app.routes.jobs import _build_inbox_generator
 
     agent_id = uuid.uuid4()
+    polis_client.store.agents[agent_id] = {
+        "id": agent_id, "owner_id": uuid.uuid4(), "name": "stub",
+        "status": "online", "skills": ["python"],
+    }
     generator = _build_inbox_generator(
         agent_id,
         ["python"],
@@ -806,6 +816,11 @@ def test_agent_inbox_live_query_casts_seen_uuid_array(polis_client):
     from app.routes.jobs import _build_inbox_generator
 
     owner_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    polis_client.store.agents[agent_id] = {
+        "id": agent_id, "owner_id": owner_id, "name": "stub",
+        "status": "online", "skills": ["python"],
+    }
 
     def add_submitted_job(title: str) -> uuid.UUID:
         job_id = uuid.uuid4()
@@ -829,7 +844,7 @@ def test_agent_inbox_live_query_casts_seen_uuid_array(polis_client):
 
     add_submitted_job("first")
     generator = _build_inbox_generator(
-        uuid.uuid4(),
+        agent_id,
         ["python"],
         {"python"},
         once=False,

@@ -6,6 +6,33 @@
 
 ## 2026-06-21（Sun）AEST
 
+### 19:55  L23 闭环：evaluator suite runner + verify_health_deep argparse 修复
+
+加 `backend/scripts/loop/run_eval_suite.py` —— 单命令跑全部 verifier 的分级 runner。
+
+三个 tier:
+- **UNIT**: 不需要 backend / 网络（worker_heartbeat / stale_claim_reaper）
+- **LOCAL_HTTP**: 需要本地 8765 backend 在跑（health_deep / reaper_admin / admin_workers）
+- **PROD**: 直打 polis-backend-production.up.railway.app（同上三个）
+
+每个 evaluator 跑独立 subprocess，不互相干扰，timeout 60s 兜底。每行打印 `✓/✗ script — PASS (3.2s) — last_meaningful_line`，最后给汇总。
+
+```
+$ python scripts/loop/run_eval_suite.py --prod
+=== Tier: UNIT (2 evaluators) ===
+  ✓ verify_worker_heartbeat.py    — PASS (4.8s)
+  ✓ verify_stale_claim_reaper.py  — PASS (5.3s)
+=== Tier: PROD (3 evaluators) ===
+  ✓ verify_health_deep.py         — PASS (2.7s)
+  ✓ verify_reaper_admin_api.py    — PASS (16.5s)
+  ✓ verify_admin_workers_api.py   — PASS (11.1s)
+Summary: 5/5 PASS  ALL EVALUATORS GREEN
+```
+
+**第一次跑就发现一个真 bug**：`verify_health_deep.py` 之前没有 `--base` 选项，硬写 `PUBLIC_BASE_URL` env 默认值 `polis-production.up.railway.app`（错的别人的服务）。修：加 argparse `--base` flag、默认值改成正确的 `polis-backend-production.up.railway.app`、env override 仍保留作为优先级 2。
+
+这就是 evaluator suite 的价值 —— 在它存在前，errors 会零散藏在各个脚本里；现在每次 loop 跑一遍，立刻暴露默认值漂移。
+
 ### 19:46  L22 闭环：cleanup 加正则前缀 + L20/L21 prod 真验
 
 **L20/L21 prod 验证**（手动 trigger build `58422a75` 后部署）：

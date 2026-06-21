@@ -1,23 +1,28 @@
 """L13 evaluator — verify /health/deep returns db + reaper state.
 
-Hits the **prod** /health/deep endpoint via PUBLIC_BASE_URL (default
-https://polis-production.up.railway.app) and asserts:
+Hits /health/deep on the configured base URL and asserts:
 
   * HTTP 200
   * status field present and one of {ok, degraded, unhealthy}
-  * db.ok == True (db is reachable from prod)
+  * db.ok == True (db is reachable)
   * reaper.enabled / reaper.running keys present
   * if reaper enabled → seconds_since_last_tick <= 3 * tick_secs
 
+Base URL precedence: --base flag > PUBLIC_BASE_URL env > prod default.
+Default points at the real Polis backend on Railway.
 Exit 0 on PASS, non-zero on FAIL. Prints a one-screen summary either way.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 import urllib.error
 import urllib.request
+
+
+DEFAULT_BASE = "https://polis-backend-production.up.railway.app"
 
 
 def fail(msg: str) -> None:
@@ -26,7 +31,14 @@ def fail(msg: str) -> None:
 
 
 def main() -> None:
-    base = os.getenv("PUBLIC_BASE_URL", "https://polis-production.up.railway.app").rstrip("/")
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--base",
+        default=os.getenv("PUBLIC_BASE_URL", DEFAULT_BASE),
+        help=f"Base URL to test (default: env PUBLIC_BASE_URL or {DEFAULT_BASE})",
+    )
+    args = ap.parse_args()
+    base = args.base.rstrip("/")
     url = f"{base}/health/deep"
     print(f"GET {url}")
     try:

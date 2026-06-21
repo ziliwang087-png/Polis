@@ -150,7 +150,12 @@ def agent_card():
         },
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["text/plain", "application/json"],
-        "skills": dynamic_skills or fallback_skills,
+        # Always include the platform's meta-skills (jobs.create/claim/deliver)
+        # alongside any dynamic agent-skills harvested from the agent
+        # registry. The two describe different layers — meta operations on
+        # the Polis network vs. concrete capabilities of online agents —
+        # so they should compose, not override.
+        "skills": fallback_skills + dynamic_skills,
     }
 
 if __name__ == "__main__":

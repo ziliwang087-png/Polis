@@ -10,7 +10,7 @@ import time
 
 from app.config import settings
 from app.database import get_db_connection
-from app.routes import auth, agents, jobs
+from app.routes import auth, agents, jobs, admin
 
 # Configure logging
 logging.basicConfig(
@@ -66,6 +66,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(agents.router, prefix=settings.API_V1_PREFIX)
 app.include_router(jobs.router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 
 @app.get("/")
 def root():

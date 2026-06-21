@@ -2,6 +2,8 @@
 Admin routes
 - GET  /api/v1/admin/fraud-alerts                查可疑事件
 - POST /api/v1/admin/fraud-review/{alert_id}     人工审核
+- GET  /api/v1/admin/reaper/stats                stale-claim reaper 统计
+- GET  /api/v1/admin/reaper/recent                最近 N 条 reaper 审计事件
 
 注意：现阶段仅做 owner 鉴权占位（要求 owner JWT），生产环境需要专门的 admin role。
 出网暴露的接口需要鉴权 — 已 flag。
@@ -146,3 +148,119 @@ def review_fraud_alert(
         new_fraud_penalty=rep.get("fraud_penalty", 1.0),
         new_total_score=rep.get("total_score", 0),
     )
+
+
+# -------------------------------------------------------------------
+# GET /admin/reaper/stats
+# -------------------------------------------------------------------
+class ReaperStatsResponse(BaseModel):
+    state: dict
+    last_24h_reaped: int
+    by_agent: List[dict]
+
+
+@router.get("/reaper/stats", response_model=ReaperStatsResponse)
+def reaper_stats(
+    _: UUID = Depends(get_current_owner),
+):
+    """Operator dashboard data for the stale-claim reaper.
+
+    Returns:
+        state: live counters from app.stale_claim_reaper.get_state()
+        last_24h_reaped: rows count for stale_claim_reaped events in last 24h
+        by_agent: top 10 previous_agent_id × reap_count over last 24h
+    """
+    try:
+        from app.stale_claim_reaper import get_state as _reaper_state
+        live = _reaper_state()
+    except Exception as exc:
+        live = {"error": repr(exc)[:300]}
+
+    by_agent: List[dict] = []
+    last_24h_reaped = 0
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*)::int AS n
+              FROM job_events
+             WHERE event_type = 'stale_claim_reaped'
+               AND created_at >= NOW() - INTERVAL '24 hours'
+            """
+        )
+        row = cur.fetchone() or {}
+        last_24h_reaped = int(row.get("n", 0))
+
+        cur.execute(
+            """
+            SELECT (payload->>'previous_agent_id') AS agent_id,
+                   COUNT(*)::int AS reap_count,
+                   MAX(created_at) AS last_reaped_at
+              FROM job_events
+             WHERE event_type = 'stale_claim_reaped'
+               AND created_at >= NOW() - INTERVAL '24 hours'
+               AND payload ? 'previous_agent_id'
+             GROUP BY (payload->>'previous_agent_id')
+             ORDER BY reap_count DESC, last_reaped_at DESC
+             LIMIT 10
+            """
+        )
+        for r in cur.fetchall():
+            by_agent.append({
+                "agent_id": r["agent_id"],
+                "reap_count": int(r["reap_count"]),
+                "last_reaped_at": (
+                    r["last_reaped_at"].isoformat()
+                    if r["last_reaped_at"] else None
+                ),
+            })
+
+    return ReaperStatsResponse(
+        state=live,
+        last_24h_reaped=last_24h_reaped,
+        by_agent=by_agent,
+    )
+
+
+# -------------------------------------------------------------------
+# GET /admin/reaper/recent
+# -------------------------------------------------------------------
+class ReaperEventOut(BaseModel):
+    job_id: UUID
+    previous_agent_id: Optional[str] = None
+    reaped_at: str
+    payload: dict
+
+
+@router.get("/reaper/recent", response_model=List[ReaperEventOut])
+def reaper_recent(
+    limit: int = Query(50, ge=1, le=500),
+    _: UUID = Depends(get_current_owner),
+):
+    """Most recent stale_claim_reaped events for forensic review."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT job_id, payload, created_at
+              FROM job_events
+             WHERE event_type = 'stale_claim_reaped'
+             ORDER BY created_at DESC
+             LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+
+    return [
+        ReaperEventOut(
+            job_id=r["job_id"],
+            previous_agent_id=(
+                r["payload"].get("previous_agent_id")
+                if isinstance(r["payload"], dict) else None
+            ),
+            reaped_at=r["created_at"].isoformat() if r["created_at"] else "",
+            payload=r["payload"] if isinstance(r["payload"], dict) else {},
+        )
+        for r in rows
+    ]

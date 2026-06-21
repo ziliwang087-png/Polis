@@ -215,7 +215,10 @@ def _parse_sse(stream):
             data_lines.append(line[5:].lstrip())
 
 
-def _work_one(api, agent_id, token, agent_spec, job, llm_cfg):
+def _work_one(api, agent_id, token, agent_spec, job, llm_cfg) -> bool:
+    """Claim, work, deliver. Returns True on real artifact delivery,
+    False when claim was skipped (409/410 already-claimed by another agent).
+    """
     job_id = job["id"]
     title = job.get("title") or "(untitled)"
     skill = job.get("required_skill")
@@ -228,7 +231,7 @@ def _work_one(api, agent_id, token, agent_spec, job, llm_cfg):
     except urllib.error.HTTPError as e:
         if e.code in (409, 410):
             logger.info("[platform-agent] job=%s already claimed/closed (%s), skip", job_id, e.code)
-            return
+            return False
         raise
 
     try:
@@ -258,6 +261,7 @@ def _work_one(api, agent_id, token, agent_spec, job, llm_cfg):
               "metadata": {"by": agent_spec["name"], "model": llm_cfg["model"]},
           })
     logger.info("[platform-agent] delivered job=%s len=%s", job_id, len(result))
+    return True
 
 
 def _worker_loop(api, agent_id, token, agent_spec, llm_cfg):
@@ -281,8 +285,13 @@ def _worker_loop(api, agent_id, token, agent_spec, llm_cfg):
                 try:
                     job = json.loads(payload)
                     worker_heartbeat.beat_job_received(name, job_id=str(job.get("id", "")))
-                    _work_one(api, agent_id, token, agent_spec, job, llm_cfg)
-                    worker_heartbeat.beat_job_done(name)
+                    delivered = _work_one(api, agent_id, token, agent_spec, job, llm_cfg)
+                    # Only count actual artifact deliveries, not 409/410 skips.
+                    # Codex C5 (2026-06-21): a job already taken by another
+                    # agent is observed via inbox SSE but doesn't represent
+                    # work this worker did.
+                    if delivered:
+                        worker_heartbeat.beat_job_done(name)
                 except Exception as e:
                     worker_heartbeat.beat_error(name, repr(e))
                     logger.exception("[platform-agent] work failed: %s", e)

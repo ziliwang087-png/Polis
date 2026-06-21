@@ -6,6 +6,30 @@
 
 ## 2026-06-21（Sun）AEST
 
+### 20:58  L24 闭环：codex review L17-L22 + 修 2 个真问题 + 加 prod 健康 cron
+
+让 codex CLI 再次独立 review L17-L22 改动（接 L18 review 模式）。结果：**0 Severity 1**（上次 review 时是 2 个 admin auth bypass，质量在改善）、**5 Severity 2**。
+
+**真问题已修**：
+- **C1**: `cleanup_demo_data.py` 的 regex `^l[0-9]+(-|probe)` 可能误中 `l2-support@company.com` 之类真实邮箱 → 加 `@example\.com$` 锚定。
+- **C5**: `beat_job_done()` 在 `_work_one()` 跳过 409/410 时仍调用，会让 `/admin/workers.jobs_done` 计数虚高 → `_work_one` 改返回 bool，只有 delivered=True 才打卡。
+
+**风险接受 ×3**: C2/C3 cleanup 边角 TOCTOU（每天跑 1 次、24h age guard、概率~0），C4 platform_agent SSE socket 不显式 close（daemon thread + Railway redeploy 兜底）。
+
+**新增 prod 监控 cron**：`polis-prod-eval-suite-daily` (job_id `515f3f82f835`)。每天 8:15 跑 `~/.hermes/scripts/polis_prod_eval.sh` → run_eval_suite.py --prod，自动投递到 origin。明早自动检查 prod 是绿是红。
+
+证据 → `docs/demos/codex-review-L17-L22-20260621.md`
+
+```
+verify_worker_heartbeat.py: PASS
+verify_stale_claim_reaper.py: PASS
+verify_health_deep.py (prod): PASS  status=ok
+verify_reaper_admin_api.py (prod): ALL CHECKS PASSED
+verify_admin_workers_api.py (prod): ALL CHECKS PASSED
+pytest tests/: 47 passed
+Summary: 5/5 PASS ALL EVALUATORS GREEN
+```
+
 ### 19:55  L23 闭环：evaluator suite runner + verify_health_deep argparse 修复
 
 加 `backend/scripts/loop/run_eval_suite.py` —— 单命令跑全部 verifier 的分级 runner。

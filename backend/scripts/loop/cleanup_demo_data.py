@@ -65,10 +65,10 @@ def main():
         if prefixes_env else DEFAULT_PREFIXES
     )
     print(f"[cleanup] prefixes={prefixes}")
-    # Regex tail: catches any future `l<N>-<hex>` or `l<N>probe<hex>` demo email
-    # so we don't have to teach this script about every new evaluator. Anchored
-    # to start-of-string to avoid matching real emails like `paul@…`.
-    DEMO_REGEX = r"^l[0-9]+(-|probe)"
+    # Regex tail: catches any future `l<N>-<hex>` or `l<N>probe<hex>` demo email.
+    # Anchored with @example.com to avoid false-positive deletes on real users
+    # (e.g. l2-support@company.com would otherwise match — codex C1, 2026-06-21).
+    DEMO_REGEX = r"^l[0-9]+(-|probe).*@example\.com$"
     print(f"[cleanup] regex_fallback={DEMO_REGEX}")
     print(f"[cleanup] age_hours={args.age_hours}  mode={'APPLY' if args.apply else 'DRY-RUN'}")
 

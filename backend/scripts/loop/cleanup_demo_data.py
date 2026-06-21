@@ -35,6 +35,16 @@ DEFAULT_PREFIXES = (
     "l11-stale-",
     "l15-",
     "l15probe",
+    "l17-",
+    "l17probe",
+    "l18-",
+    "l18probe",
+    "l19-",
+    "l19probe",
+    "l20-",
+    "l20probe",
+    "l21-",
+    "l21probe",
     "check-",
 )
 
@@ -55,6 +65,11 @@ def main():
         if prefixes_env else DEFAULT_PREFIXES
     )
     print(f"[cleanup] prefixes={prefixes}")
+    # Regex tail: catches any future `l<N>-<hex>` or `l<N>probe<hex>` demo email
+    # so we don't have to teach this script about every new evaluator. Anchored
+    # to start-of-string to avoid matching real emails like `paul@…`.
+    DEMO_REGEX = r"^l[0-9]+(-|probe)"
+    print(f"[cleanup] regex_fallback={DEMO_REGEX}")
     print(f"[cleanup] age_hours={args.age_hours}  mode={'APPLY' if args.apply else 'DRY-RUN'}")
 
     db = os.environ.get("DATABASE_URL")
@@ -68,17 +83,17 @@ def main():
     with psycopg2.connect(db) as conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # 1. Find candidate users
+        # 1. Find candidate users -- explicit prefixes OR regex fallback
         cur.execute(
             f"""
             SELECT id::text AS id, email, created_at
               FROM users
-             WHERE ({like_clauses})
+             WHERE (({like_clauses}) OR email ~ %s)
                AND created_at < NOW() - make_interval(hours => %s)
              ORDER BY created_at ASC
              LIMIT %s
             """,
-            (*like_params, args.age_hours, args.limit),
+            (*like_params, DEMO_REGEX, args.age_hours, args.limit),
         )
         candidates = cur.fetchall()
         print(f"[cleanup] found {len(candidates)} candidate user(s)")

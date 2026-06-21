@@ -6,6 +6,36 @@
 
 ## 2026-06-21（Sun）AEST
 
+### 19:55  L22 闭环：cleanup 加正则前缀 + L20/L21 prod 真验
+
+**L20/L21 prod 验证**（手动 trigger build `58422a75` 后部署）：
+
+```
+$ curl https://polis-backend-production.up.railway.app/health/deep
+status: ok  workers.total=2 fresh=2 connected=2
+  polis-platform-py        keepalives= 18  secs_since_seen=  3
+  polis-platform-translator keepalives= 17  secs_since_seen=  9
+
+$ verify_admin_workers_api.py (against prod)
+  PASS /admin/workers: total=2 fresh=2 connected=2 all_fresh=True
+  PASS auth required (401 no token)
+  PASS non-admin rejected (403 user token)
+  ALL CHECKS PASSED
+```
+
+**L21 真见效**：之前（L19 时刻）`secs_since_seen=487`，现在钉在 3-9 秒——SSE 每 15s heartbeat 事件吃到了。
+
+**L22 改进**：`cleanup_demo_data.py` 加正则前缀兜底 `^l[0-9]+(-|probe)`，未来新 evaluator 注册的 `l<N>-...@example.com` 自动覆盖，不用每次改 DEFAULT_PREFIXES。同时把 l17-l21 的显式前缀也补全（双保险）。
+
+```
+$ python scripts/loop/cleanup_demo_data.py --age-hours 0 --limit 50  (dry-run)
+[cleanup] regex_fallback=^l[0-9]+(-|probe)
+[cleanup] found 17 candidate user(s)
+[cleanup] would delete: users=17 jobs=23 agents=6 events=83
+```
+
+dry-run 命中 17 个 demo 用户（含今天新跑的 L20/L21 evaluator 残留）。**没 apply**——明天 18:00 cron 会按 24h age guard 自动清。
+
 ### 19:30  L21 闭环：worker 心跳吃 SSE keepalive 事件，长连接静默期不再"假死"
 
 L19/L20 prod 验证暴露的真实缺口——worker SSE 长连接静默期间 `last_seen_at` 不刷新，`seconds_since_last_seen` 持续增长，过 600s 阈值会被误判 stale。但**后端 inbox SSE 早就每 15 秒发 `event: heartbeat`**（见 `routes/agents.py::stream_agent_inbox`），platform-agent 之前直接 `if event != "job.available": continue` 吃掉了。

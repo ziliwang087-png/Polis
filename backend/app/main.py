@@ -33,6 +33,16 @@ def _start_platform_agent():
         logging.getLogger("polis").exception("platform-agent startup hook crashed")
 
 
+@app.on_event("startup")
+async def _start_stale_claim_reaper():
+    """启动僵尸 claim 清理后台任务。失败不影响 web 服务。"""
+    try:
+        from app.stale_claim_reaper import maybe_start_reaper
+        maybe_start_reaper()
+    except Exception:
+        logging.getLogger("polis").exception("stale-claim-reaper startup hook crashed")
+
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,

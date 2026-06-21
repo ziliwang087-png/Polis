@@ -4,6 +4,67 @@
 
 ---
 
+## 2026-06-21（Sun）AEST
+
+### 16:40  L13–L17 闭环：lifespan + 运维端点 + 数据卫生 + cron + prod 验证
+
+主人外出，授权 loop engineering「自己 loop 干到我回家」。继 L9–L12 之后做的第二轮：
+
+- **L13** `feat: FastAPI lifespan + /health/deep`（commit `6788f39`）
+  - 替换 deprecated `on_event(startup)` 钩子为 `asynccontextmanager` lifespan
+  - 新 `/health/deep` 暴露 db ping latency + reaper 实时状态（enabled / running / tick_secs / age_secs / last_tick_at / total_reaped / last_error / seconds_since_last_tick），三档 status `ok / degraded / unhealthy`
+  - reaper 加 `get_state()` + per-tick 计数器供运维 dashboard 用
+  - 评估器 `verify_health_deep.py` PASS
+
+- **L14** `feat: job_event_type adds stale_claim_reaped enum value`（commit `70f76a5`）
+  - alembic migration `20260621_stale_claim_reaped.py`：用 raw psycopg2 autocommit 绕开 ALTER TYPE 事务限制做 `ADD VALUE IF NOT EXISTS 'stale_claim_reaped'`
+  - reaper 切换 audit 用新 event_type；user-initiated cancel 与 reaper sweep 不再共用 `canceled` 类型
+  - migration 已 `alembic upgrade head` 应用到 prod Supabase，验证 enum 现含 7 个 label
+  - 评估器 `verify_stale_claim_reaper.py`（更新过断言）PASS
+
+- **L15** `feat: admin reaper stats + recent events APIs`（commit `0df5ed4`）
+  - `GET /api/v1/admin/reaper/stats` —— live state + last_24h_reaped 计数 + by_agent top10
+  - `GET /api/v1/admin/reaper/recent` —— 最近 N 条 stale_claim_reaped 事件
+  - owner JWT 鉴权
+  - **顺手修了 pre-existing bug**：`main.py` 之前 `from app.routes import ... admin` 但**没** `app.include_router(admin.router)`，意味着 `/admin/fraud-alerts /admin/fraud-review` 在 prod 一直 404。L15 顺路挂上
+  - 评估器 `verify_reaper_admin_api.py` 本地+prod 都 PASS
+
+- **L16** `feat: demo data cleanup script`（commit `74951ad`）
+  - `backend/scripts/loop/cleanup_demo_data.py`：`--age-hours` guard（默认 24h）+ `--apply` opt-in（默认 dry-run）+ 1h 活跃 job 保护
+  - 已实地真清 prod **8 个 demo 用户 + 35 jobs + 154 events**（用户从 34 → 26）
+  - 评估器 `verify_demo_data_cleanup.py` 用 OLD/FRESH probe 用户验证只清 OLD 不动 FRESH
+
+- **L17** **运维自动化**：`hermes cronjob` 每天 18:00 跑 `cleanup_demo_data.py --age-hours 48 --apply`（job_id `8a9041894c34`）
+
+### 16:00  关键纠正：prod 域名一直打错
+
+- 之前 morning_summary 里写「L12 prod 5/5 PASS」，但实测 `polis-production.up.railway.app/health/deep` 返 404
+- `railway status --json` 查得真域是 **`polis-backend-production.up.railway.app`**（`polis-production` 是别人的 service "Sistema Pólis API" v0.1.0）
+- 重测真域 → L13 prod `/health/deep` 200 status=ok，L15 prod `/admin/reaper/stats` 200，L9–L16 实际都已上 prod
+- 已写进记忆，避免下次再打错
+
+### 验收快照（pytest 47/47, prod 健康）
+
+```
+$ curl https://polis-backend-production.up.railway.app/health/deep
+{
+  "status": "ok",
+  "db": {"ok": true, "latency_ms": 1680.1},
+  "reaper": {"enabled": true, "running": true, "tick_secs": 60,
+             "age_secs": 300, "total_reaped": 0,
+             "seconds_since_last_tick": 13}
+}
+```
+
+### 留给主人的下一步（recommendations）
+1. BYOK 用真正官方 OpenAI/DeepSeek key 跑端到端验证（目前 prod LLM 走 aiprox 中转，relay-only 已证，官方 key 路径未验）
+2. Real-time channel（PG LISTEN bridge / websocket）—— 消除 60s reaper 通知窗口
+3. `/health/deep` 加 platform-agent worker 状态（目前只反馈 reaper，platform-agent daemon thread 没暴露状态）
+4. 前端 `/admin/reaper` 仪表板把 L15 这两个 API 接入（目前没 UI 入口）
+5. ~~demo cleanup 自动化~~ —— 已 L17 cron 化
+
+---
+
 ## 2026-06-20（Sat）AEST
 
 ### 22:30  注册 Agent 页面为非开发者简化（v1.1）

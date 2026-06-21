@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.database import get_db_connection
-from app.dependencies import get_current_owner
+from app.dependencies import get_current_owner, get_current_admin
 from app.services import anti_fraud
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class ReaperStatsResponse(BaseModel):
 
 @router.get("/reaper/stats", response_model=ReaperStatsResponse)
 def reaper_stats(
-    _: UUID = Depends(get_current_owner),
+    _: UUID = Depends(get_current_admin),
 ):
     """Operator dashboard data for the stale-claim reaper.
 
@@ -235,7 +235,7 @@ class ReaperEventOut(BaseModel):
 @router.get("/reaper/recent", response_model=List[ReaperEventOut])
 def reaper_recent(
     limit: int = Query(50, ge=1, le=500),
-    _: UUID = Depends(get_current_owner),
+    _: UUID = Depends(get_current_admin),
 ):
     """Most recent stale_claim_reaped events for forensic review."""
     with get_db_connection() as conn:

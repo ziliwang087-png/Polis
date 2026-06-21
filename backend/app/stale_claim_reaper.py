@@ -49,44 +49,72 @@ def reap_once() -> int:
     """Run a single sweep. Return number of jobs reaped.
 
     Synchronous so it can be unit-tested without an event loop.
+
+    Concurrency-safe via FOR UPDATE SKIP LOCKED: parallel reaper
+    processes (during deploy overlap) won't double-reap, and rows
+    being actively touched by the agent's deliver/progress path
+    will be skipped this tick. The UPDATE re-checks the status
+    predicate so an agent that completes the job between the
+    SELECT and the UPDATE doesn't get its work undone.
     """
     age = _env_int("POLIS_STALE_CLAIM_AGE_SECS", 300)
     with get_db_connection() as conn:
         cur = conn.cursor()
-        # CTE 1: jobs with claim older than threshold
-        # CTE 2: jobs whose most recent progress event is also older
-        # Final: intersect them, reset status, insert audit event
+        # 1. Pick stale candidates with row-level lock; skip rows being modified.
         cur.execute(
             """
-            WITH stale_jobs AS (
-              SELECT j.id, j.to_agent_id
+            SELECT j.id::text AS id, j.to_agent_id::text AS to_agent_id
               FROM jobs j
-              WHERE j.status IN ('claimed', 'working')
-                AND j.claimed_at IS NOT NULL
-                AND j.claimed_at < NOW() - make_interval(secs => %s)
-                AND NOT EXISTS (
-                  SELECT 1 FROM job_events e
+             WHERE j.status IN ('claimed', 'working')
+               AND j.claimed_at IS NOT NULL
+               AND j.claimed_at < NOW() - make_interval(secs => %s)
+               AND NOT EXISTS (
+                 SELECT 1 FROM job_events e
                   WHERE e.job_id = j.id
                     AND e.event_type = 'progress'
                     AND e.created_at >= NOW() - make_interval(secs => %s)
-                )
-            ),
-            reset AS (
-              UPDATE jobs SET
-                status = 'submitted',
-                to_agent_id = NULL,
-                claimed_at = NULL,
-                started_at = NULL,
-                progress = NULL
-              WHERE id IN (SELECT id FROM stale_jobs)
-              RETURNING id
-            )
-            SELECT s.id::text, s.to_agent_id::text FROM stale_jobs s
-            JOIN reset r ON r.id = s.id
+               )
+             FOR UPDATE OF j SKIP LOCKED
             """,
             (age, age),
         )
-        reaped = cur.fetchall()
+        candidates = cur.fetchall()
+        if not candidates:
+            return 0
+
+        reaped: list[dict] = []
+        for cand in candidates:
+            # 2. Re-check predicate inside the locked transaction;
+            #    UPDATE only reaps if the job is *still* stale.
+            cur.execute(
+                """
+                UPDATE jobs SET
+                    status = 'submitted',
+                    to_agent_id = NULL,
+                    claimed_at = NULL,
+                    started_at = NULL,
+                    progress = NULL
+                  WHERE id = %s
+                    AND status IN ('claimed', 'working')
+                    AND claimed_at IS NOT NULL
+                    AND claimed_at < NOW() - make_interval(secs => %s)
+                    AND NOT EXISTS (
+                      SELECT 1 FROM job_events e
+                       WHERE e.job_id = jobs.id
+                         AND e.event_type = 'progress'
+                         AND e.created_at >= NOW() - make_interval(secs => %s)
+                    )
+                RETURNING id::text
+                """,
+                (cand["id"], age, age),
+            )
+            updated = cur.fetchone()
+            if updated:
+                reaped.append({
+                    "id": cand["id"],
+                    "to_agent_id": cand["to_agent_id"],
+                })
+
         for row in reaped:
             cur.execute(
                 """
@@ -152,7 +180,9 @@ async def _reaper_loop():
     try:
         while True:
             try:
-                count = reap_once()
+                # Run the synchronous psycopg2 sweep in a thread so the
+                # event loop is never blocked on db I/O.
+                count = await asyncio.to_thread(reap_once)
                 _state["last_tick_at"] = int(_t.time())
                 _state["last_reap_count"] = count
                 _state["total_reaped"] += count

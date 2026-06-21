@@ -84,7 +84,7 @@ def health():
 
 
 @app.get("/health/deep")
-def health_deep():
+async def health_deep():
     """Deep health: db ping + reaper state.
 
     Status semantics:
@@ -92,19 +92,19 @@ def health_deep():
       degraded — anything off (db slow, reaper not ticking, etc.)
       unhealthy — db unreachable
     """
-    db_ok = True
-    db_latency_ms = None
-    db_error = None
-    t0 = time.perf_counter()
-    try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.fetchone()
-        db_latency_ms = round((time.perf_counter() - t0) * 1000, 1)
-    except Exception as exc:
-        db_ok = False
-        db_error = repr(exc)[:300]
+    def _db_ping():
+        t0 = time.perf_counter()
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            return True, round((time.perf_counter() - t0) * 1000, 1), None
+        except Exception as exc:
+            return False, None, repr(exc)[:300]
+
+    import asyncio
+    db_ok, db_latency_ms, db_error = await asyncio.to_thread(_db_ping)
 
     try:
         from app.stale_claim_reaper import get_state as _reaper_state

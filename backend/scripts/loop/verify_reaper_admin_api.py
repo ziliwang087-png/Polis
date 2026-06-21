@@ -61,8 +61,22 @@ def main():
     })
     if code != 200:
         fail(f"register failed: {code} {body}")
-    token = body["token"]
-    print(f"[verify-L15] registered {email}")
+    user_token = body["token"]
+    user_id = body["user"]["id"]
+    print(f"[verify-L15] registered {email} id={user_id[:8]}")
+
+    # Build an admin JWT locally — same secret/algo as backend, with is_admin=true.
+    # This requires the test runner to have JWT_SECRET_KEY available
+    # via the same .env.loop the backend uses.
+    import os
+    import sys as _sys
+    import pathlib
+    _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    try:
+        from app.auth import create_access_token as _ct
+        token = _ct({"sub": user_id, "type": "user", "is_admin": True})
+    except Exception as e:
+        fail(f"failed to mint admin token (need JWT_SECRET_KEY in env): {e}")
 
     # 2. /admin/reaper/stats
     code, body = http("GET", f"{base}/admin/reaper/stats", token=token)
@@ -95,11 +109,17 @@ def main():
                 fail(f"recent event missing {k!r}: {ev}")
     print(f"[verify-L15] PASS reaper/recent: {len(body)} events")
 
-    # 4. Auth required
+    # 4. Auth required (no token)
     code, body = http("GET", f"{base}/admin/reaper/stats")
     if code in (200,):
         fail(f"reaper/stats accessible without token! code={code}")
     print(f"[verify-L15] PASS auth required (got {code} without token)")
+
+    # 4b. Plain user token (NOT admin) must be rejected
+    code, body = http("GET", f"{base}/admin/reaper/stats", token=user_token)
+    if code != 403:
+        fail(f"non-admin user token allowed! code={code} body={body}")
+    print(f"[verify-L15] PASS non-admin rejected (got 403 for user_token)")
 
     print("[verify-L15] ALL CHECKS PASSED")
 

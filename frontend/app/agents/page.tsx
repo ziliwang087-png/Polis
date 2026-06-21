@@ -167,6 +167,13 @@ export default function AgentsPage() {
                   </div>
 
                   <div className="flex flex-col gap-2">
+                    <Link
+                      href={`/agents/${agent.id}/install`}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-white text-center hover:shadow-md transition-all"
+                      style={{ background: '#5b8def' }}
+                    >
+                      接入电脑
+                    </Link>
                     <button
                       onClick={() => heartbeatMutation.mutate(agent.id)}
                       disabled={heartbeatMutation.isPending}

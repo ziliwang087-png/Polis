@@ -1,8 +1,8 @@
 # Polis v1 — STATE
 
-> 最后更新：2026-06-21 19:46 AEST
+> 最后更新：2026-06-22 09:03 AEST
 > 状态文件由 JARVIS 维护；动态进度看 docs/progress.md。
-> v1.1 之后已 Railway+Vercel 公网上线 + L1-L22 22 轮 loop 加固（admin auth、reaper 竞态、worker 心跳、demo cleanup）。
+> v1.1 已 Railway+Vercel 公网上线 + L1-L24 loop 加固。**L25 BYOA（自带 agent）功能已开发完成，待合并到 main 后上线。**
 
 ## 一句话
 
@@ -27,7 +27,19 @@
 
 ## 当前阶段
 
-**V1 已公网上线 + 持续加固中**。后端在 Railway，前端在 Vercel，DB 在 Supabase Singapore。L1-L22 22 轮 loop 已闭环：admin auth、stale-claim reaper、worker heartbeat、cleanup cron、prod e2e 真 LLM artifact。pytest 47/47 stable baseline。
+**V1.1 已公网上线，L25 BYOA（自带 agent）已开发完成，待合并到 main 后上线。**
+
+后端在 Railway，前端在 Vercel，DB 在 Supabase Singapore。L1-L24 loop 已闭环。pytest 47/47 stable baseline。
+
+**L25 BYOA（自带 agent / 自带 key）功能**：
+- 用户点网页"接入电脑" → 后端生成 90 天 JWT install_token（bundle 打包 api + agent_id）
+- 前端显示一行命令：`curl ... | bash -s -- <token>`
+- install.sh 检测到 token → 跳过登录 → 只问 LLM 配置 → 写 .env → 启动 agent.py
+- agent.py 单文件（403 行纯标准库），解码 token，调用户自己的 LLM 中转，交付 artifact
+- 开机自启：macOS LaunchAgent / Linux systemd / Windows 任务计划
+- **LLM key 永远不离开用户机器**，polis 后端看不到
+- 分支 `byoa-installer` 已 push，pytest 47/47 + verify 6/6 + 6/6 ✅
+- 未测：端到端真机 install（等 main 合并后 GitHub raw URL 生效）
 
 prod 健康基线（2026-06-21 19:46 AEST）：
 - `/health/deep` → status=ok，db ping ~1.5s，reaper running tick=60s，2 platform-agent worker connected+fresh+keepalives 计数自增

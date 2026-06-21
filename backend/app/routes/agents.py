@@ -1,7 +1,11 @@
 """
 Polis v1 A2A agent routes.
 """
+import base64
+import json
 import logging
+import os
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -341,3 +345,74 @@ async def stream_agent_inbox(
 
     generator = _build_inbox_generator(agent_id, list(skills), skills, once)
     return StreamingResponse(generator(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# BYOA install-token (L25)
+# ---------------------------------------------------------------------------
+# Mints a base64-encoded bundle that the BYOA agent.py script consumes.
+# The bundle includes a long-lived JWT (90d) so a user's home machine can
+# stay connected without re-auth. LLM key/base/model are NOT included; the
+# user supplies those locally so secrets never leave their machine.
+
+BYOA_TOKEN_TTL_DAYS = 90
+
+
+@router.post("/{agent_id}/install-token", response_model=dict)
+def issue_install_token(
+    agent_id: UUID,
+    owner_id: UUID = Depends(get_current_owner),
+):
+    """Issue a BYOA install token for this agent.
+
+    Returns a base64url-encoded bundle plus a ready-to-paste install command.
+    LLM credentials are intentionally NOT bundled — they stay on the user's
+    machine, supplied via env vars at runtime.
+    """
+    from app.auth import create_access_token
+    from app.config import settings
+
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, owner_id FROM agents WHERE id = %s AND owner_id = %s",
+            (str(agent_id), str(owner_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent_name = row["name"]
+
+    long_token = create_access_token(
+        {"sub": str(owner_id), "type": "user", "scope": "byoa", "agent_id": str(agent_id)},
+        expires_delta=timedelta(days=BYOA_TOKEN_TTL_DAYS),
+    )
+
+    api_base = settings.PUBLIC_BASE_URL.rstrip("/")
+    bundle = {
+        "api": api_base,
+        "token": long_token,
+        "agent_id": str(agent_id),
+        "agent_name": agent_name,
+    }
+    raw = json.dumps(bundle, separators=(",", ":")).encode("utf-8")
+    install_token = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    # install.sh 由 GitHub raw 提供（polis-backend 没有 /byoa/get 路由，
+    # 后端只生成 token + 命令文本，不托管 shell 脚本）。
+    repo = os.getenv("POLIS_BYOA_REPO", "ziliwang087-png/Polis")
+    ref = os.getenv("POLIS_BYOA_REF", "main")
+    install_sh_url = (
+        f"https://raw.githubusercontent.com/{repo}/{ref}/backend/byoa/install.sh"
+    )
+    install_command = (
+        f"curl -fsSL {install_sh_url} | bash -s -- {install_token}"
+    )
+
+    return {
+        "install_token": install_token,
+        "agent_id": str(agent_id),
+        "agent_name": agent_name,
+        "expires_in_days": BYOA_TOKEN_TTL_DAYS,
+        "install_command": install_command,
+    }

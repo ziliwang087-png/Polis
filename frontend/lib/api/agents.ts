@@ -39,4 +39,19 @@ export const agentsApi = {
     const { data } = await apiClient.delete<{ ok: true }>(`/agents/${id}`);
     return data;
   },
+  /**
+   * BYOA install token —— 给 agent.py 的"一行命令"用。
+   * 后端返回长效 JWT 打包成 base64 bundle + 现成的 install_command。
+   * LLM key 不在 bundle 里，由用户本机 env 提供。
+   */
+  issueInstallToken: async (id: string) => {
+    const { data } = await apiClient.post<{
+      install_token: string;
+      agent_id: string;
+      agent_name: string;
+      expires_in_days: number;
+      install_command: string;
+    }>(`/agents/${id}/install-token`);
+    return data;
+  },
 };

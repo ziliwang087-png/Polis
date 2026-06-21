@@ -6,6 +6,48 @@
 
 ## 2026-06-21（Sun）AEST
 
+### 16:50  L18 闭环：codex 独立 review 找出的 4 个真问题已修
+
+让 codex CLI 在隔离上下文里 review L9–L16 改动。codex 给 **FIX-NEEDED**，列了 6 项:
+
+- **S1 真漏洞 ×2**（admin auth 不严）→ **已修**
+  - `/admin/reaper/{stats,recent}` 之前用 `get_current_owner`，任何注册用户的 JWT 都能通过 → 暴露 reaper 审计 IDs 给所有登录用户
+  - 新增 `get_current_admin` dependency：要 `payload.is_admin=True` 或 `sub ∈ POLIS_ADMIN_USER_IDS`（env allowlist），都不满足返 403
+  - L15 评估器加 4b 步：普通用户 token 必须得 403
+
+- **S2 并发隐患 ×2**（reaper 竞态 + 同步 I/O 阻塞 event loop）→ **已修**
+  - reaper 从 CTE 一把 reset 改成两步：`SELECT ... FOR UPDATE OF j SKIP LOCKED` 锁候选，每行 `UPDATE WHERE id=%s AND <stale predicate>` 再 check 一次，agent 进度/deliver 写入和 reaper 互不抢。多 replica 部署也安全。
+  - reaper loop + `/health/deep` 的同步 psycopg2 全包 `await asyncio.to_thread(...)`，慢查不阻塞事件循环。
+
+- **S2 风险接受 ×2**（migration 致命性 + cleanup agent 守护）—— 风险量级低 + 缓解措施已在场（reaper 的 `last_error` 字段会被 `/health/deep` 暴露在 60s 内；cleanup 的 demo prefix 匹配限制在 bot 用户）
+
+证据 → `docs/demos/codex-review-L9-L16-20260621.md`
+
+```
+verify_reaper_admin_api.py (local): 5/5 PASS (含新 4b 非-admin 403 检查)
+verify_stale_claim_reaper.py: ALL CHECKS PASSED
+verify_health_deep.py: PASS
+pytest tests/: 47 passed
+```
+
+### 16:41  Prod e2e 5/5 PASS（修对域名后真验）
+
+`demo_e2e.py` 对真域 `polis-backend-production.up.railway.app` 跑 5 个 job（python/translate/write/review/research），全部 completed 真 LLM artifact:
+
+| skill | artifact by | 内容 |
+|---|---|---|
+| python | polis-platform-py | fizzbuzz 30 行循环正确 |
+| translate | polis-platform-translator | 中→英完整翻译 |
+| write | polis-platform-py | 产品发布稿真句子 |
+| review | polis-platform-py | 准确指出 ZeroDivisionError + fix |
+| research | polis-platform-py | 中文 PgBouncer transaction pooling 风险分析 |
+
+报告归档 → `docs/demos/polis-prod-e2e-20260621-1641.md`
+
+---
+
+## 2026-06-21（Sun）AEST
+
 ### 16:40  L13–L17 闭环：lifespan + 运维端点 + 数据卫生 + cron + prod 验证
 
 主人外出，授权 loop engineering「自己 loop 干到我回家」。继 L9–L12 之后做的第二轮：

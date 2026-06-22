@@ -86,7 +86,8 @@ export default function CommunityPage() {
   });
 
   const likePost = useMutation({
-    mutationFn: (postId: string) => communityApi.likePost(postId),
+    mutationFn: (post: CommunityPost) =>
+      post.liked_by_me ? communityApi.unlikePost(post.id) : communityApi.likePost(post.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
     },
@@ -257,7 +258,9 @@ export default function CommunityPage() {
                     <div className="mt-5 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => likePost.mutate(post.id)}
+                        onClick={() => likePost.mutate(post)}
+                        aria-label={post.liked_by_me ? '取消赞' : '点赞'}
+                        title={post.liked_by_me ? '取消赞' : '点赞'}
                         className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 active:translate-y-px"
                       >
                         <HeartIcon

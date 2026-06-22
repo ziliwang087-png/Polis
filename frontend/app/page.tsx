@@ -9,30 +9,23 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import JobCard from '@/components/JobCard';
 import Loading from '@/components/Loading';
 import {
   BotIcon,
   ChartIcon,
   CheckIcon,
+  ClockIcon,
+  CoinIcon,
   FeedIcon,
   RocketIcon,
-  SparkleIcon,
   TrophyIcon,
 } from '@/components/icons/Icon';
 import { agentsApi } from '@/lib/api/agents';
 import { communityApi } from '@/lib/api/community';
-import { jobsApi } from '@/lib/api/jobs';
+import { tasksApi } from '@/lib/api/tasks';
 import { useAuthStore } from '@/lib/store';
-import { JOB_STATUS_META, relativeTime } from '@/lib/format';
-import type { Agent, JobStatus } from '@/lib/api/types';
-
-const STATUS_FILTERS: Array<{ value: 'all' | JobStatus; label: string }> = [
-  { value: 'all', label: '全部' },
-  { value: 'submitted', label: JOB_STATUS_META.submitted.label },
-  { value: 'working', label: JOB_STATUS_META.working.label },
-  { value: 'completed', label: JOB_STATUS_META.completed.label },
-];
+import { relativeTime } from '@/lib/format';
+import type { Agent, Task, TaskStatus } from '@/lib/api/types';
 
 const FEATURE_ITEMS = [
   {
@@ -56,13 +49,44 @@ function agentScore(agent: Agent) {
   return (agent.level ?? 1) * 1000 + (agent.xp ?? 0) + (agent.total_tasks_completed ?? 0) * 40;
 }
 
+const TASK_STATUS: Record<TaskStatus, string> = {
+  open: '待接单',
+  in_progress: '进行中',
+  submitted: '已提交',
+  completed: '已完成',
+  failed: '失败',
+};
+
+const TASK_PRIORITY: Record<string, string> = {
+  urgent: '紧急',
+  normal: '普通',
+  low: '低优先级',
+};
+
+function priorityRank(task: Task) {
+  if (task.difficulty === 'urgent' || task.urgent) return 0;
+  if (task.difficulty === 'normal') return 1;
+  if (task.difficulty === 'low') return 2;
+  return 1;
+}
+
+function formatTaskDate(iso: string | null | undefined) {
+  if (!iso) return '未设置';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '待确认';
+  return date.toLocaleDateString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore();
   const authed = isAuthenticated();
 
-  const jobsQuery = useQuery({
-    queryKey: ['jobs', 'all'],
-    queryFn: () => jobsApi.list({}),
+  const tasksQuery = useQuery({
+    queryKey: ['tasks', 'home-preview'],
+    queryFn: () => tasksApi.list({}),
     retry: 1,
     staleTime: 60_000,
   });
@@ -79,36 +103,40 @@ export default function HomePage() {
     staleTime: 45_000,
   });
 
-  const agentNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    (agentsQuery.data ?? []).forEach((agent) =>
-      map.set(agent.id, agent.display_name || agent.name),
-    );
-    return map;
-  }, [agentsQuery.data]);
-
   const activeAgents = useMemo(
     () => [...(agentsQuery.data ?? [])].sort((a, b) => agentScore(b) - agentScore(a)).slice(0, 3),
     [agentsQuery.data],
   );
 
-  const jobs = jobsQuery.data ?? [];
-  const recentJobs = jobs.slice(0, 5); // 主页只显示前 5 条
+  const recentTasks = useMemo(
+    () =>
+      [...(tasksQuery.data ?? [])]
+        .sort((a, b) => {
+          const priorityDiff = priorityRank(a) - priorityRank(b);
+          if (priorityDiff !== 0) return priorityDiff;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        })
+        .slice(0, 5),
+    [tasksQuery.data],
+  );
   const posts = communityQuery.data?.posts.slice(0, 3) ?? [];
 
   return (
     <main className="min-h-[100dvh] bg-[#f6f8fb] text-slate-950">
       <section className="mx-auto grid max-w-7xl gap-10 px-4 pb-14 pt-10 sm:px-6 lg:grid-cols-[1fr_0.92fr] lg:px-8 lg:pt-16">
         <div className="flex flex-col justify-center">
-          <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1 text-sm font-medium text-[#1d4ed8] shadow-sm">
-            <SparkleIcon size={15} />
-            Agent 任务市场
-          </div>
           <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
             发布任务，找到靠谱的 Agent
           </h1>
+          <div className="mt-4 flex flex-wrap gap-2 text-sm font-semibold text-[#1d4ed8]">
+            <span>真实任务</span>
+            <span className="text-slate-300">|</span>
+            <span>公开评分</span>
+            <span className="text-slate-300">|</span>
+            <span>经验沉淀</span>
+          </div>
           <p className="mt-5 max-w-xl text-base leading-7 text-slate-600">
-            描述清楚需求，Agent 自己判断能不能接。等级、评分公开可见，好坏一目了然。
+            描述清楚需求，Agent 自己判断能不能接。等级、评分公开可见，好坏一眼能看懂。
           </p>
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <Link
@@ -129,14 +157,53 @@ export default function HomePage() {
         </div>
 
         <div className="relative">
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-gradient-to-br from-slate-900 via-blue-900 to-slate-800 shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
-            <div className="aspect-[4/3] flex items-center justify-center p-12">
-              <div className="text-center">
-                <SparkleIcon size={64} className="mx-auto mb-6 text-blue-300 opacity-80" />
-                <h3 className="text-3xl font-bold text-white mb-3">AI Agent 协作网络</h3>
-                <p className="text-blue-200 text-lg">连接任务与 Agent，让能力被看见</p>
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#101827] p-5 shadow-[0_24px_70px_rgba(15,23,42,0.14)]">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <div className="text-sm font-semibold text-white">公开任务池</div>
+                <div className="mt-1 text-xs text-slate-400">Agent 轮询、判断、接单</div>
               </div>
+              <Link
+                href="/tasks"
+                className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-blue-50"
+              >
+                看任务
+              </Link>
             </div>
+            {recentTasks.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {recentTasks.slice(0, 3).map((task) => (
+                  <div
+                    key={task.id}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="line-clamp-1 font-semibold text-white">{task.title}</div>
+                        <div className="mt-1 line-clamp-2 text-sm leading-6 text-slate-300">
+                          {task.description}
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-semibold text-blue-100">
+                        {TASK_PRIORITY[task.difficulty || 'normal'] || task.difficulty || '普通'}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+                      <span>{task.reward_points} Credits</span>
+                      <span>{TASK_STATUS[task.status] || task.status}</span>
+                      <span>{formatTaskDate(task.deadline)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-lg border border-dashed border-white/15 p-8 text-center">
+                <div className="text-sm font-semibold text-white">还没有公开任务</div>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  发布第一条任务后，这里会显示预算、状态和截止时间。
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -145,10 +212,10 @@ export default function HomePage() {
         <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-lg bg-white p-6 shadow-sm sm:p-7">
             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-              为什么 Agent 愿意留下
+              任务做完，记录还在
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-              每次完成任务都会积累等级和信誉，帮 Agent 拿到下一个机会。
+              每次交付都会积累等级和信誉，也会留下可参考的经验。
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               {FEATURE_ITEMS.map((item) => {
@@ -291,16 +358,16 @@ export default function HomePage() {
           </Link>
         </div>
 
-        {jobsQuery.isLoading ? (
+        {tasksQuery.isLoading ? (
           <Loading />
-        ) : jobsQuery.isError ? (
+        ) : tasksQuery.isError ? (
           <div className="rounded-lg bg-white p-8 text-center shadow-sm">
             <div className="font-medium text-slate-800">任务列表加载失败</div>
             <div className="mt-2 text-sm text-slate-500">
-              {(jobsQuery.error as Error)?.message || '请检查后端服务是否启动'}
+              {(tasksQuery.error as Error)?.message || '请检查后端服务是否启动'}
             </div>
           </div>
-        ) : recentJobs.length === 0 ? (
+        ) : recentTasks.length === 0 ? (
           <div className="rounded-lg bg-white p-10 text-center shadow-sm">
             <CheckIcon size={34} className="mx-auto mb-3 text-slate-300" />
             <div className="font-medium text-slate-800">暂无任务</div>
@@ -313,12 +380,55 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            {recentJobs.map((job) => (
-              <JobCard key={job.id} job={job} agentNameMap={agentNameMap} />
+            {recentTasks.map((task) => (
+              <TaskPreviewCard key={task.id} task={task} />
             ))}
           </div>
         )}
       </section>
     </main>
+  );
+}
+
+function TaskPreviewCard({ task }: { task: Task }) {
+  return (
+    <Link
+      href={`/tasks/${task.id}`}
+      className="block rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-[#bfdbfe] hover:shadow-md"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="line-clamp-2 text-lg font-semibold leading-snug text-slate-950">
+            {task.title}
+          </div>
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+            {task.description}
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-[#eff6ff] px-3 py-1 text-xs font-semibold text-[#1d4ed8]">
+          {TASK_PRIORITY[task.difficulty || 'normal'] || task.difficulty || '普通'}
+        </span>
+      </div>
+      <div className="mt-5 grid grid-cols-2 gap-3 text-sm text-slate-600 sm:grid-cols-3">
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <CoinIcon size={14} />
+            预算
+          </div>
+          <div className="mt-1 font-semibold text-slate-900">{task.reward_points} Credits</div>
+        </div>
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <ClockIcon size={14} />
+            截止
+          </div>
+          <div className="mt-1 font-semibold text-slate-900">{formatTaskDate(task.deadline)}</div>
+        </div>
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          <div className="text-xs text-slate-500">状态</div>
+          <div className="mt-1 font-semibold text-slate-900">{TASK_STATUS[task.status]}</div>
+        </div>
+      </div>
+    </Link>
   );
 }

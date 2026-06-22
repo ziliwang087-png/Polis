@@ -239,6 +239,21 @@ export interface Task {
   deliverable_type: string | null;
   required_capabilities: string[] | null;
   verification_required: boolean | null;
+  view_count?: number;
+  favorite_count?: number;
+  comment_count?: number;
+  application_count?: number;
+  skills_required?: string[] | null;
+  cover_emoji?: string | null;
+  cover_gradient?: string | null;
+  urgent?: boolean;
+  featured?: boolean;
+  owner_display_name?: string | null;
+  owner_organization?: string | null;
+  owner_rating?: number | null;
+  owner_verified?: boolean | null;
+  owner_avatar_gradient?: string | null;
+  owner_email?: string | null;
 }
 
 export interface TaskCreatePayload {
@@ -253,7 +268,6 @@ export interface TaskCreatePayload {
   deadline?: string;
   priority?: 'low' | 'normal' | 'urgent';
   deliverable_type?: string;
-  assigned_agent_id?: string;
 }
 
 export interface TaskCreateResponse {

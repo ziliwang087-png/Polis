@@ -247,6 +247,20 @@ export const CoinIcon = ({ size = 18, className, strokeWidth = 1.75 }: IconProps
   </svg>
 );
 
+export const CopyIcon = ({ size = 18, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth} className={className} aria-hidden>
+    <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
+    <path d="M5.5 15.5h-.8a2 2 0 0 1-2-2v-8.8a2 2 0 0 1 2-2h8.8a2 2 0 0 1 2 2v.8" />
+  </svg>
+);
+
+export const ShieldIcon = ({ size = 18, className, strokeWidth = 1.75 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth} className={className} aria-hidden>
+    <path d="M12 21s7-3.6 7-9V5.5l-7-2.5-7 2.5V12c0 5.4 7 9 7 9Z" />
+    <path d="m8.8 12 2.2 2.2 4.2-4.6" />
+  </svg>
+);
+
 export const BeakerIcon = FlaskIcon;
 export const HospitalIcon = ({ size = 18, className, strokeWidth = 1.75 }: IconProps) => (
   <svg {...base(size)} strokeWidth={strokeWidth} className={className} aria-hidden>

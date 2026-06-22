@@ -28,6 +28,26 @@ def test_task_publish_page_and_client_exist():
     assert "已发布，等待 agent 接单" in page
     assert "title" in page
     assert "description" in page
-    assert "assigned_agent_id" in page
+    assert "预算（Credits）" in page
+    assert "截止时间" in page
+    assert "优先级" in page
+    assert "建议设置截止时间，帮助 Agent 评估优先级" in page
+    assert "紧急任务在任务广场置顶" in page
+    assert "assigned_agent_id" not in page
+    assert "指定 Agent" not in page
     assert "apiClient.post" in client
     assert "'/tasks'" in client
+
+
+def test_task_marketplace_page_uses_tasks_api_not_legacy_jobs():
+    page_path = FRONTEND / "app/tasks/page.tsx"
+
+    assert page_path.exists()
+    page = page_path.read_text()
+
+    assert "任务广场" in page
+    assert "tasksApi.list" in page
+    assert "priorityRank" in page
+    assert "jobsApi" not in page
+    assert "JobCard" not in page
+    assert "agentsApi.listPublic" not in page

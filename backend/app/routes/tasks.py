@@ -60,23 +60,23 @@ def create_task(
             # 否则 psycopg2 会把 list 当成 text[] 数组传过去，引发类型不匹配。
             from psycopg2.extras import Json
             required_capabilities = request.required_capabilities or []
+            reward_points = request.budget if request.budget is not None else request.reward_points
+            difficulty = request.priority or request.difficulty
 
             cur.execute(
                 """
                 INSERT INTO tasks (
                     owner_id, title, description, category, difficulty,
                     required_capabilities, estimated_hours, reward_points,
-                    budget, deadline, priority, deliverable_type, assigned_agent_id
+                    deadline, deliverable_type, assigned_agent_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     str(owner_id), request.title, request.description, request.category,
-                    request.difficulty, Json(required_capabilities), request.estimated_hours,
-                    request.reward_points, request.budget, request.deadline, request.priority,
-                    request.deliverable_type,
-                    str(request.assigned_agent_id) if request.assigned_agent_id else None
+                    difficulty, Json(required_capabilities), request.estimated_hours,
+                    reward_points, request.deadline, request.deliverable_type, None
                 )
             )
             result = cur.fetchone()
@@ -148,10 +148,16 @@ def pending_tasks(agent_id: UUID = Depends(get_current_agent)):
                 SELECT {TASK_LIST_COLUMNS}
                 FROM tasks t
                 WHERE t.status = 'open'
-                  AND (t.assigned_agent_id IS NULL OR t.assigned_agent_id = %s)
-                ORDER BY t.created_at ASC
+                ORDER BY
+                    CASE t.difficulty
+                        WHEN 'urgent' THEN 0
+                        WHEN 'normal' THEN 1
+                        WHEN 'low' THEN 2
+                        ELSE 1
+                    END,
+                    t.created_at ASC
                 """,
-                (str(agent_id),),
+                (),
             )
             return [TaskListResponse(**dict(task)) for task in cur.fetchall()]
 

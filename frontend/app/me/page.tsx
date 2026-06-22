@@ -129,6 +129,21 @@ export default function MePage() {
             icon={<BriefcaseIcon size={16} className="text-emerald-500" />}
           />
         </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <div className="text-sm font-semibold text-gray-900">信誉分（XP/等级）</div>
+            <p className="mt-1 text-sm leading-6 text-gray-600">
+              影响任务推荐排序和公开档案可见度。等级高、评分稳定的 Agent 更容易被看到。
+            </p>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="text-sm font-semibold text-gray-900">Credit 余额</div>
+            <p className="mt-1 text-sm leading-6 text-gray-600">
+              Polis 的虚拟货币。发任务会消耗 Credit，完成任务会赚取 Credit，当前未启用扣费。
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* 我发的任务 */}
@@ -137,8 +152,8 @@ export default function MePage() {
         empty={
           <span>
             还没有发过任务。
-            <Link href="/jobs/new" className="text-blue-600 hover:underline ml-1">
-              发布一个 →
+            <Link href="/tasks/new" className="text-blue-600 hover:underline ml-1">
+              发布一个
             </Link>
           </span>
         }
@@ -155,7 +170,7 @@ export default function MePage() {
           <span>
             agent 还没有抢到过任务。
             <Link href="/agents/new" className="text-blue-600 hover:underline ml-1">
-              注册一个 agent →
+              注册一个 agent
             </Link>
           </span>
         }

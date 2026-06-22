@@ -167,6 +167,11 @@ class FakeCursor:
                 "total_jobs": 0,
                 "success_rate": 0.0,
                 "avg_rating": None,
+                "xp": 0,
+                "level": 1,
+                "total_tasks_completed": 0,
+                "total_tasks_failed": 0,
+                "badge_count": 0,
                 "created_at": self.store.now(),
                 "updated_at": self.store.now(),
             }
@@ -203,6 +208,12 @@ class FakeCursor:
             aid = uuid.UUID(str(params[0]))
             row = self.store.agents.get(aid)
             self._rows = [{"status": row["status"]}] if row else []
+            return
+
+        if compact == "select total_tasks_completed from agents where id = %s":
+            aid = uuid.UUID(str(params[0]))
+            row = self.store.agents.get(aid)
+            self._rows = [{"total_tasks_completed": row.get("total_tasks_completed", 0)}] if row else []
             return
 
         if "select * from agents where owner_id = %s" in compact:
@@ -253,6 +264,25 @@ class FakeCursor:
             ]
             self.store.agents[aid]["avg_rating"] = sum(ratings) / len(ratings)
             self.store.agents[aid]["success_rate"] = 1.0
+            self._rows = []
+            return
+
+        if compact.startswith("update agents set xp = xp + %s"):
+            xp_gain, level_xp_gain, aid = int(params[0]), int(params[1]), uuid.UUID(str(params[2]))
+            row = self.store.agents[aid]
+            row["xp"] = row.get("xp", 0) + xp_gain
+            row["level"] = int((row["xp"]) / 100.0) + 1
+            if "total_tasks_completed = total_tasks_completed + 1" in compact:
+                row["total_tasks_completed"] = row.get("total_tasks_completed", 0) + 1
+            self._rows = [{
+                "xp": row["xp"],
+                "level": row["level"],
+                "total_tasks_completed": row.get("total_tasks_completed", 0),
+            }]
+            assert xp_gain == level_xp_gain
+            return
+
+        if compact.startswith("insert into badges"):
             self._rows = []
             return
 
@@ -379,9 +409,25 @@ class FakeCursor:
             self._rows = [{"?column?": 1}] if (post_id, user_id) in self.store.post_likes else []
             return
 
+        if compact.startswith("select post_id from post_likes where post_id = any"):
+            post_ids = {uuid.UUID(str(post_id)) for post_id in params[0]}
+            user_id = uuid.UUID(str(params[1]))
+            self._rows = [
+                {"post_id": post_id}
+                for post_id, liked_user_id in self.store.post_likes
+                if post_id in post_ids and liked_user_id == user_id
+            ]
+            return
+
         if compact.startswith("insert into post_likes"):
             post_id, user_id = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
             self.store.post_likes.add((post_id, user_id))
+            self._rows = []
+            return
+
+        if compact.startswith("delete from post_likes where post_id = %s and user_id = %s"):
+            post_id, user_id = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
+            self.store.post_likes.discard((post_id, user_id))
             self._rows = []
             return
 
@@ -440,13 +486,12 @@ class FakeCursor:
             return
 
         if compact.startswith("select t.id, t.owner_id") and "from tasks t where t.status = 'open'" in compact:
-            agent_id = uuid.UUID(str(params[0]))
             rows = [
                 row for row in self.store.tasks.values()
                 if row["status"] == "open"
-                and (row["assigned_agent_id"] is None or row["assigned_agent_id"] == agent_id)
             ]
-            rows.sort(key=lambda row: row["created_at"])
+            priority = {"urgent": 0, "normal": 1, "low": 2}
+            rows.sort(key=lambda row: (priority.get(row.get("difficulty") or "normal", 1), row["created_at"]))
             self._rows = rows
             return
 
@@ -501,6 +546,10 @@ class FakeCursor:
 
         if "from task_submissions where task_id = %s" in compact:
             self._rows = []
+            return
+
+        if "from task_ratings" in compact and "select count(*) as count" in compact:
+            self._rows = [{"count": 0}]
             return
 
         # notifications
@@ -652,6 +701,15 @@ class FakeCursor:
             self._rows = [row for row in self.store.job_artifacts.values() if row["job_id"] == jid]
             return
 
+        if "select * from job_artifacts" in compact and "job_id = any(%s::uuid[])" in compact:
+            job_ids = {uuid.UUID(str(job_id)) for job_id in params[0]}
+            self._rows = [
+                row for row in self.store.job_artifacts.values()
+                if row["job_id"] in job_ids
+            ]
+            self._rows.sort(key=lambda row: (row["job_id"], row["created_at"]))
+            return
+
         if compact.startswith("insert into job_ratings"):
             job_id, rater_id, stars, feedback = params[:4]
             rid = uuid.uuid4()
@@ -672,6 +730,14 @@ class FakeCursor:
             self._rows = [row for row in self.store.job_ratings.values() if row["job_id"] == jid][:1]
             return
 
+        if "select * from job_ratings where job_id = any(%s::uuid[])" in compact:
+            job_ids = {uuid.UUID(str(job_id)) for job_id in params[0]}
+            self._rows = [
+                row for row in self.store.job_ratings.values()
+                if row["job_id"] in job_ids
+            ]
+            return
+
         if compact.startswith("insert into job_events"):
             job_id, event_type, payload = params[:3]
             self._rows = [self.store.add_event(uuid.UUID(str(job_id)), event_type, _plain(payload))]
@@ -683,6 +749,15 @@ class FakeCursor:
                 row for row in self.store.job_events.values() if row["job_id"] == jid
             ]
             self._rows.sort(key=lambda row: row["created_at"])
+            return
+
+        if "select * from job_events" in compact and "job_id = any(%s::uuid[])" in compact:
+            job_ids = {uuid.UUID(str(job_id)) for job_id in params[0]}
+            self._rows = [
+                row for row in self.store.job_events.values()
+                if row["job_id"] in job_ids
+            ]
+            self._rows.sort(key=lambda row: (row["job_id"], row["created_at"]))
             return
 
         if "pg_notify" in compact:
@@ -718,6 +793,20 @@ def fake_connection(store: FakePolisStore):
 
 @pytest.fixture()
 def polis_client(monkeypatch):
+    from psycopg2 import pool
+
+    class NoopConnectionPool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def getconn(self):
+            return None
+
+        def putconn(self, conn):
+            pass
+
+    monkeypatch.setattr(pool, "ThreadedConnectionPool", NoopConnectionPool)
+
     from app.main import app
     from app.routes import agents as agents_routes
     from app.routes import auth as auth_routes
@@ -822,10 +911,17 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
             "title": "Summarize a short brief",
             "description": "Read the brief and return three bullets.",
             "assigned_agent_id": agent["id"],
+            "budget": 12,
+            "priority": "urgent",
+            "deadline": "2026-07-01T09:30:00Z",
         },
     )
     assert create_response.status_code == 200
     task_id = create_response.json()["task_id"]
+    created_task = polis_client.store.tasks[uuid.UUID(task_id)]
+    assert created_task["assigned_agent_id"] is None
+    assert created_task["reward_points"] == 12
+    assert created_task["difficulty"] == "urgent"
 
     pending_response = polis_client.get(
         "/api/v1/tasks/pending",
@@ -835,6 +931,9 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
     pending = pending_response.json()
     assert [task["id"] for task in pending] == [task_id]
     assert pending[0]["status"] == "open"
+    assert pending[0]["assigned_agent_id"] is None
+    assert pending[0]["reward_points"] == 12
+    assert pending[0]["difficulty"] == "urgent"
 
     claim_response = polis_client.post(
         f"/api/v1/tasks/{task_id}/claim",
@@ -946,6 +1045,19 @@ def test_community_posts_comments_likes_and_agent_task_share(polis_client):
     assert second_like.status_code == 200
     assert first_like.json()["likes"] == 1
     assert second_like.json()["likes"] == 1
+
+    unlike = polis_client.delete(
+        f"/api/v1/community/posts/{post_id}/like",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    unlike_again = polis_client.delete(
+        f"/api/v1/community/posts/{post_id}/like",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert unlike.status_code == 200
+    assert unlike.json() == {"liked": False, "likes": 0}
+    assert unlike_again.status_code == 200
+    assert unlike_again.json() == {"liked": False, "likes": 0}
 
     share_response = polis_client.post(
         "/api/v1/community/agent/task-share",

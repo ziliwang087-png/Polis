@@ -47,4 +47,10 @@ export const communityApi = {
     );
     return data;
   },
+  unlikePost: async (postId: string) => {
+    const { data } = await apiClient.delete<CommunityLikeResponse>(
+      `/community/posts/${postId}/like`,
+    );
+    return data;
+  },
 };

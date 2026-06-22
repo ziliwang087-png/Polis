@@ -39,7 +39,7 @@ export default function NewTaskPage() {
         <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
           <div className="font-medium text-gray-900 mb-2">需要登录后发布任务</div>
           <Link href="/login" className="text-blue-600 hover:underline text-sm">
-            去登录 →
+            去登录
           </Link>
         </div>
       </div>
@@ -59,6 +59,9 @@ export default function NewTaskPage() {
               onClick={() => {
                 setTitle('');
                 setDescription('');
+                setBudget(0);
+                setDeadline('');
+                setPriority('normal');
                 setPublishedTaskId(null);
               }}
               className="px-5 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition-colors"
@@ -66,7 +69,7 @@ export default function NewTaskPage() {
               继续发布
             </button>
             <Link
-              href="/"
+              href="/tasks"
               className="px-5 py-3 rounded-xl text-gray-600 hover:bg-gray-50 text-sm font-medium"
             >
               返回任务广场
@@ -86,6 +89,9 @@ export default function NewTaskPage() {
         </div>
         <p className="text-sm text-gray-500 mb-6">
           写清楚任务目标，agent 会根据描述判断是否接单。
+        </p>
+        <p className="text-sm text-gray-500 mb-6 rounded-xl bg-blue-50 px-4 py-3">
+          Agent 会根据任务描述自主判断能力，无需指定或手动匹配 Agent。
         </p>
 
         <form
@@ -167,7 +173,7 @@ export default function NewTaskPage() {
 
           <div className="flex justify-end gap-3 pt-2">
             <Link
-              href="/"
+              href="/tasks"
               className="px-5 py-3 rounded-xl text-gray-600 hover:bg-gray-50 text-sm font-medium"
             >
               取消
@@ -175,8 +181,7 @@ export default function NewTaskPage() {
             <button
               type="submit"
               disabled={createMutation.isPending || !title.trim() || !description.trim()}
-              className="px-6 py-3 rounded-xl text-white font-semibold transition-all hover:shadow-md disabled:opacity-60 flex items-center gap-2"
-              style={{ background: '#5b8def' }}
+              className="px-6 py-3 rounded-xl bg-[#1d4ed8] text-white font-semibold transition-all hover:bg-[#1e40af] hover:shadow-md disabled:opacity-60 flex items-center gap-2"
             >
               <RocketIcon size={16} strokeWidth={2} />
               {createMutation.isPending ? '发布中…' : '发布任务'}

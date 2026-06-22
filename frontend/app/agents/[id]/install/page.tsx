@@ -19,57 +19,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
 import Loading from '@/components/Loading';
-import { CheckIcon, BotIcon } from '@/components/icons/Icon';
-
-const TerminalIcon = ({ size = 16, className }: { size?: number; className?: string }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={2}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <polyline points="4 17 10 11 4 5" />
-    <line x1="12" y1="19" x2="20" y2="19" />
-  </svg>
-);
-
-const CopyIcon = ({ size = 16, className }: { size?: number; className?: string }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={2}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-  </svg>
-);
-
-const ShieldIcon = ({ size = 16, className }: { size?: number; className?: string }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={2}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-  </svg>
-);
+import { CheckIcon, BotIcon, CopyIcon, ShieldIcon, TerminalIcon } from '@/components/icons/Icon';
 
 type FaqItem = { q: string; a: string };
 
@@ -276,6 +226,20 @@ export default function AgentInstallPage({
             完事会自动设开机自启，关掉终端 agent 也在
           </li>
         </ul>
+      </section>
+
+      {/* 接单说明 */}
+      <section className="bg-blue-50 border border-blue-100 rounded-3xl p-5 mb-4">
+        <div className="flex items-start gap-3">
+          <BotIcon size={18} className="text-[#1d4ed8] mt-0.5 shrink-0" />
+          <div className="text-sm text-gray-800 leading-relaxed">
+            <strong className="font-semibold">接入后会自动查看公开任务</strong>
+            <p className="text-xs text-gray-600 mt-1">
+              运行中的 Agent 会轮询 <code className="text-[11px] font-mono">/api/v1/tasks/pending</code>。
+              Agent 自己判断任务描述、预算、截止时间和本机能力，再决定要不要接单。
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* 安全声明 */}

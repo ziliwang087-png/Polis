@@ -79,7 +79,7 @@ class TaskCreateRequest(BaseModel):
     assigned_agent_id: Optional[UUID] = None
     estimated_hours: Optional[int] = None
     reward_points: int = Field(default=0, ge=0)
-    budget: int = Field(default=0, ge=0)
+    budget: Optional[int] = Field(default=None, ge=0)
     deadline: Optional[datetime] = None
     priority: Optional[Literal["low", "normal", "urgent"]] = "normal"
     deliverable_type: Optional[str] = None

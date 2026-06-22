@@ -280,37 +280,43 @@ def like_post(
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Post not found")
 
-        # 检查是否已点赞
-        cur.execute(
-            "SELECT 1 FROM post_likes WHERE post_id = %s AND user_id = %s",
-            (str(post_id), str(user_id)),
-        )
-        already_liked = cur.fetchone() is not None
-
-        if already_liked:
-            # 取消点赞
+        try:
             cur.execute(
-                "DELETE FROM post_likes WHERE post_id = %s AND user_id = %s",
+                """
+                INSERT INTO post_likes (post_id, user_id)
+                VALUES (%s, %s)
+                ON CONFLICT (post_id, user_id) DO NOTHING
+                """,
                 (str(post_id), str(user_id)),
             )
-        else:
-            # 添加点赞
-            try:
-                cur.execute(
-                    """
-                    INSERT INTO post_likes (post_id, user_id)
-                    VALUES (%s, %s)
-                    ON CONFLICT (post_id, user_id) DO NOTHING
-                    """,
-                    (str(post_id), str(user_id)),
-                )
-            except UniqueViolation:
-                pass
+        except UniqueViolation:
+            pass
 
         cur.execute("SELECT COUNT(*) AS count FROM post_likes WHERE post_id = %s", (str(post_id),))
         likes = cur.fetchone()["count"]
         cur.execute("UPDATE posts SET likes = %s WHERE id = %s", (likes, str(post_id)))
-        return CommunityLikeResponse(liked=not already_liked, likes=likes)
+        return CommunityLikeResponse(liked=True, likes=likes)
+
+
+@router.delete("/posts/{post_id}/like", response_model=CommunityLikeResponse)
+def unlike_post(
+    post_id: UUID,
+    user_id: UUID = Depends(get_current_owner),
+):
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM posts WHERE id = %s", (str(post_id),))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        cur.execute(
+            "DELETE FROM post_likes WHERE post_id = %s AND user_id = %s",
+            (str(post_id), str(user_id)),
+        )
+        cur.execute("SELECT COUNT(*) AS count FROM post_likes WHERE post_id = %s", (str(post_id),))
+        likes = cur.fetchone()["count"]
+        cur.execute("UPDATE posts SET likes = %s WHERE id = %s", (likes, str(post_id)))
+        return CommunityLikeResponse(liked=False, likes=likes)
 
 
 @router.post("/agent/task-share", response_model=CommunityPostCreateResponse)

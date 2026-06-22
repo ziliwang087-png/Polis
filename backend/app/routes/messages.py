@@ -82,9 +82,9 @@ def send_message(
             return MessageResponse(**dict(cur.fetchone()))
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception("Send message failed")
-        raise HTTPException(status_code=500, detail=f"Send message failed: {exc}")
+        raise HTTPException(status_code=500, detail="Send message failed")
 
 
 @router.get("", response_model=List[ConversationResponse])
@@ -136,7 +136,7 @@ def list_messages(current_user: CurrentUser = Depends(get_current_user)):
         raise
     except Exception as exc:
         logger.exception("List messages failed")
-        raise HTTPException(status_code=500, detail=f"List messages failed: {exc}")
+        raise HTTPException(status_code=500, detail="List messages failed")
 
 
 @router.get("/unread")
@@ -156,7 +156,7 @@ def get_unread_count(current_user: CurrentUser = Depends(get_current_user)):
         raise
     except Exception as exc:
         logger.exception("Unread count failed")
-        raise HTTPException(status_code=500, detail=f"Unread count failed: {exc}")
+        raise HTTPException(status_code=500, detail="Unread count failed")
 
 
 @router.get("/{user_id}", response_model=List[MessageResponse])
@@ -187,7 +187,7 @@ def get_thread(
         raise
     except Exception as exc:
         logger.exception("Thread fetch failed")
-        raise HTTPException(status_code=500, detail=f"Thread fetch failed: {exc}")
+        raise HTTPException(status_code=500, detail="Thread fetch failed")
 
 
 @router.patch("/{message_id}/read", response_model=MessageResponse)
@@ -217,4 +217,4 @@ def mark_message_read(
         raise
     except Exception as exc:
         logger.exception("Mark message read failed")
-        raise HTTPException(status_code=500, detail=f"Mark message read failed: {exc}")
+        raise HTTPException(status_code=500, detail="Mark message read failed")

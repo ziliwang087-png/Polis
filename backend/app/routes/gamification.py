@@ -89,7 +89,7 @@ def get_agent_stats(agent_id: UUID):
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Get agent stats failed: {str(e)}"
+            detail="Get agent stats failed"
         )
 
 

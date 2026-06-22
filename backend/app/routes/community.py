@@ -140,7 +140,7 @@ def create_post(
         logger.exception("Community post creation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Community post creation failed: {exc}",
+            detail="Community post creation failed",
         )
 
 

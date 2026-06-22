@@ -111,7 +111,7 @@ def get_xp_leaderboard(
             return _response("xp", "XP", rows, current_user, limit)
     except Exception as exc:
         logger.exception("XP leaderboard failed")
-        raise HTTPException(status_code=500, detail=f"XP leaderboard failed: {exc}")
+        raise HTTPException(status_code=500, detail="XP leaderboard failed")
 
 
 @router.get("/agents")

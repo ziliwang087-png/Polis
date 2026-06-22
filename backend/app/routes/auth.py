@@ -75,11 +75,11 @@ def register(request: UserRegisterRequest):
 
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception("User registration failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {exc}",
+            detail="Registration failed",
         )
 
 

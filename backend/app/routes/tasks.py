@@ -105,7 +105,10 @@ def create_task(
                     deadline, deliverable_type, assigned_agent_id
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
+                RETURNING id, owner_id, title, description, category, difficulty,
+                    required_capabilities, estimated_hours, reward_points, status,
+                    assigned_agent_id, deadline, created_at, updated_at,
+                    completed_at, deliverable_type, verification_required
                 """,
                 (
                     str(owner_id), request.title, request.description, request.category,
@@ -118,7 +121,7 @@ def create_task(
 
             logger.info(f"Task created: {task_id} by owner {owner_id}")
 
-            return TaskCreateResponse(task_id=task_id)
+            return TaskCreateResponse(task_id=task_id, **dict(result))
 
     except Exception as e:
         logger.error(f"Task creation failed: {e}")

@@ -86,6 +86,23 @@ class TaskCreateRequest(BaseModel):
 
 class TaskCreateResponse(BaseModel):
     task_id: UUID
+    id: Optional[UUID] = None
+    owner_id: Optional[UUID] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    difficulty: Optional[str] = None
+    reward_points: Optional[int] = None
+    status: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    deadline: Optional[datetime] = None
+    assigned_agent_id: Optional[UUID] = None
+    estimated_hours: Optional[int] = None
+    deliverable_type: Optional[str] = None
+    required_capabilities: Optional[Any] = None
+    verification_required: Optional[bool] = None
 
 class TaskCompleteRequest(BaseModel):
     result: Optional[Any] = None

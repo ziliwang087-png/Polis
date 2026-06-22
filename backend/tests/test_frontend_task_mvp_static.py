@@ -28,7 +28,7 @@ def test_task_publish_page_and_client_exist():
     assert "已发布，等待 agent 接单" in page
     assert "title" in page
     assert "description" in page
-    assert "预算（Credits）" in page
+    assert "预算（Credits，可选）" in page
     assert "截止时间" in page
     assert "优先级" in page
     assert "建议设置截止时间，帮助 Agent 评估优先级" in page

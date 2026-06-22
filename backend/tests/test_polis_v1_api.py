@@ -471,7 +471,7 @@ class FakeCursor:
                 "verification_required": True,
             }
             self.store.tasks[tid] = row
-            self._rows = [{"id": tid}]
+            self._rows = [row]
             return
 
         if compact.startswith("select t.id, t.owner_id") and "from tasks t where 1=1" in compact:
@@ -982,8 +982,12 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
         },
     )
     assert create_response.status_code == 200
-    task_id = create_response.json()["task_id"]
+    created_body = create_response.json()
+    task_id = created_body["task_id"]
     created_task = polis_client.store.tasks[uuid.UUID(task_id)]
+    assert created_body["id"] == task_id
+    assert created_body["title"] == created_task["title"]
+    assert created_body["status"] == "open"
     assert created_task["assigned_agent_id"] is None
     assert created_task["reward_points"] == 12
     assert created_task["difficulty"] == "urgent"

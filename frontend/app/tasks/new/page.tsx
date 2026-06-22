@@ -5,18 +5,28 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useMutation } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '@/lib/api/tasks';
 import { useAuthStore } from '@/lib/store';
 import { CheckIcon, RocketIcon } from '@/components/icons/Icon';
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export default function NewTaskPage() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated } = useAuthStore();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [budget, setBudget] = useState(0);
+  const [budget, setBudget] = useState('');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState<'low' | 'normal' | 'urgent'>('normal');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [publishedTaskId, setPublishedTaskId] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -24,14 +34,22 @@ export default function NewTaskPage() {
       tasksApi.create({
         title: title.trim(),
         description: description.trim(),
-        budget,
+        budget: budget === '' ? 0 : Number(budget),
         deadline: deadline || undefined,
         priority,
       }),
     onSuccess: (data) => {
       setPublishedTaskId(data.task_id);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      setTimeout(() => {
+        router.push('/tasks');
+      }, 2000);
     },
   });
+
+  const removeSelectedFile = (indexToRemove: number) => {
+    setSelectedFiles((files) => files.filter((_, index) => index !== indexToRemove));
+  };
 
   if (!isAuthenticated()) {
     return (
@@ -59,9 +77,10 @@ export default function NewTaskPage() {
               onClick={() => {
                 setTitle('');
                 setDescription('');
-                setBudget(0);
+                setBudget('');
                 setDeadline('');
                 setPriority('normal');
+                setSelectedFiles([]);
                 setPublishedTaskId(null);
               }}
               className="px-5 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition-colors"
@@ -121,22 +140,21 @@ export default function NewTaskPage() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
-              placeholder="交代背景、输入材料、期望输出格式和验收标准。"
+              placeholder="交代背景、目标、输入材料和验收标准。"
             />
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-gray-700 mb-1 block">预算（Credits）*</span>
+            <span className="text-sm font-medium text-gray-700 mb-1 block">预算（Credits，可选）</span>
             <input
               type="number"
-              required
               min="0"
               value={budget}
-              onChange={(e) => setBudget(Number(e.target.value))}
+              onChange={(e) => setBudget(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
               placeholder="0"
             />
-            <p className="text-xs text-gray-500 mt-1">发布任务需要支付 Credits，完成后转给 Agent</p>
+            <p className="text-xs text-gray-500 mt-1">不填写时默认为 0 Credits</p>
           </label>
 
           <label className="block">
@@ -163,6 +181,51 @@ export default function NewTaskPage() {
             </select>
             <p className="text-xs text-gray-500 mt-1">紧急任务在任务广场置顶</p>
           </label>
+
+          <div className="block">
+            <span className="text-sm font-medium text-gray-700 mb-1 block">附件（可选）</span>
+            <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/50">
+              <input
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length > 0) {
+                    setSelectedFiles((current) => [...current, ...files]);
+                  }
+                  e.target.value = '';
+                }}
+              />
+              <span className="text-sm font-medium text-gray-900">选择本地文件</span>
+              <span className="mt-1 text-xs text-gray-500">可一次选择多个文件，发布前可移除</span>
+            </label>
+
+            {selectedFiles.length > 0 && (
+              <div className="mt-3 rounded-xl border border-gray-200 bg-white">
+                <div className="border-b border-gray-100 px-4 py-2 text-xs font-medium text-gray-500">
+                  已选择 {selectedFiles.length} 个文件
+                </div>
+                <ul className="divide-y divide-gray-100">
+                  {selectedFiles.map((file, index) => (
+                    <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-gray-900">{file.name}</div>
+                        <div className="text-xs text-gray-500">{formatFileSize(file.size)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSelectedFile(index)}
+                        className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                      >
+                        删除
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
 
           {createMutation.isError && (
             <div className="text-sm text-red-600 bg-red-50 rounded-xl p-3">

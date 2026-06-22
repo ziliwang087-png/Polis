@@ -272,6 +272,23 @@ export interface TaskCreatePayload {
 
 export interface TaskCreateResponse {
   task_id: string;
+  id?: string;
+  owner_id?: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  difficulty?: string | null;
+  reward_points?: number;
+  status?: TaskStatus;
+  assigned_agent_id?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  deadline?: string | null;
+  estimated_hours?: number | null;
+  deliverable_type?: string | null;
+  required_capabilities?: string[] | null;
+  verification_required?: boolean | null;
 }
 
 export interface TaskRating {

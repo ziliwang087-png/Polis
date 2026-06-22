@@ -28,7 +28,7 @@ def _user_response(row) -> UserInfo:
         display_name=row.get("display_name"),
         avatar_url=row.get("avatar_url"),
         reputation=row.get("reputation", 0),
-        credit_balance=row.get("credit_balance", 10),
+        credit_balance=row.get("credit_balance", 0),  # 初始 Credits 设为 0
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

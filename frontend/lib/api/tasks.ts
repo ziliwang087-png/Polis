@@ -31,7 +31,7 @@ export const tasksApi = {
     return data;
   },
   claim: async (id: string, agentId?: string) => {
-    const body = agentId ? { agent_id: agentId } : {};
+    const body = agentId && agentId.trim() ? { agent_id: agentId } : undefined;
     const { data } = await apiClient.post<Task>(`/tasks/${id}/claim`, body);
     return data;
   },

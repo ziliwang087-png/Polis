@@ -97,12 +97,35 @@ class FakeCursor:
                 "display_name": display_name,
                 "avatar_url": avatar_url,
                 "reputation": 0,
-                "credit_balance": 10,
+                "credit_balance": 100,
                 "created_at": self.store.now(),
                 "updated_at": self.store.now(),
             }
             self.store.users[uid] = row
             self._rows = [row]
+            return
+
+        if compact.startswith("update users set credit_balance = credit_balance - %s"):
+            amount, uid = int(params[0]), uuid.UUID(str(params[1]))
+            row = self.store.users.get(uid)
+            if row and row["credit_balance"] >= amount:
+                row["credit_balance"] -= amount
+                row["updated_at"] = self.store.now()
+                self._rows = [{"credit_balance": row["credit_balance"]}]
+            else:
+                self._rows = []
+            return
+
+        if compact.startswith("update users set credit_balance = credit_balance + %s"):
+            amount = int(params[0])
+            reputation = int(params[1]) if "reputation = reputation + %s" in compact else 0
+            uid_param = params[2] if "reputation = reputation + %s" in compact else params[1]
+            uid = uuid.UUID(str(uid_param))
+            if uid in self.store.users:
+                self.store.users[uid]["credit_balance"] += amount
+                self.store.users[uid]["reputation"] += reputation
+                self.store.users[uid]["updated_at"] = self.store.now()
+            self._rows = []
             return
 
         if "select * from users where email = %s or username = %s" in compact:
@@ -443,6 +466,34 @@ class FakeCursor:
             self._rows = []
             return
 
+        if compact.startswith("select author_type, author_id from posts where id = %s"):
+            pid = uuid.UUID(str(params[0]))
+            post = self.store.community_posts.get(pid)
+            self._rows = [
+                {
+                    "author_type": post["author_type"],
+                    "author_id": post["author_id"],
+                }
+            ] if post else []
+            return
+
+        if compact.startswith("delete from posts where id = %s"):
+            pid = uuid.UUID(str(params[0]))
+            row = self.store.community_posts.pop(pid, None)
+            if row:
+                self.store.community_comments = {
+                    cid: comment
+                    for cid, comment in self.store.community_comments.items()
+                    if comment["post_id"] != pid
+                }
+                self.store.post_likes = {
+                    like
+                    for like in self.store.post_likes
+                    if like[0] != pid
+                }
+            self._rows = [row] if row else []
+            return
+
         # tasks
         if compact.startswith("insert into tasks"):
             (
@@ -450,6 +501,7 @@ class FakeCursor:
                 required_capabilities, estimated_hours, reward_points,
                 deadline, deliverable_type, assigned_agent_id,
             ) = params[:11]
+            attachments = _plain(params[11]) if len(params) > 11 else []
             tid = uuid.uuid4()
             row = {
                 "id": tid,
@@ -469,6 +521,7 @@ class FakeCursor:
                 "completed_at": None,
                 "deliverable_type": deliverable_type,
                 "verification_required": True,
+                "attachments": attachments,
             }
             self.store.tasks[tid] = row
             self._rows = [row]
@@ -512,6 +565,7 @@ class FakeCursor:
                     "assigned_agent_id": row["assigned_agent_id"],
                     "owner_id": row["owner_id"],
                     "title": row["title"],
+                    "reward_points": row["reward_points"],
                 }
             ] if row else []
             return
@@ -1062,6 +1116,189 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
     assert fail_response.json()["status"] == "failed"
 
 
+def test_task_publish_uploads_and_returns_input_attachments(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "task-attachments@example.com",
+            "password": "secret123",
+            "username": "taskattachments",
+        },
+    )
+    owner_token = owner_response.json()["token"]
+
+    encoded = base64.b64encode(b"brief contents").decode("ascii")
+    create_response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Review attached brief",
+            "description": "Use the attachment as source material.",
+            "budget": 7,
+            "attachments": [
+                {
+                    "filename": "brief.txt",
+                    "mime": "text/plain",
+                    "content_base64": encoded,
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 200
+    body = create_response.json()
+    task = polis_client.store.tasks[uuid.UUID(body["task_id"])]
+    assert body["attachments"][0]["filename"] == "brief.txt"
+    assert task["attachments"][0]["url"].startswith("https://storage.example/polis-attachments/")
+    assert polis_client.store.uploads[0]["filename"] == "brief.txt"
+
+    detail_response = polis_client.get(f"/api/v1/tasks/{body['task_id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["task"]["attachments"][0]["filename"] == "brief.txt"
+
+
+def test_user_token_can_claim_start_and_submit_with_owned_agent(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "browser-agent-owner@example.com",
+            "password": "secret123",
+            "username": "browseragentowner",
+        },
+    )
+    owner_token = owner_response.json()["token"]
+
+    agent_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "name": "browser-worker",
+            "display_name": "Browser Worker",
+            "description": "Can be driven from the browser.",
+            "auth_method": "none",
+        },
+    )
+    agent = agent_response.json()
+
+    task_response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Browser claim task",
+            "description": "The user should be able to select their agent.",
+            "budget": 3,
+        },
+    )
+    task_id = task_response.json()["task_id"]
+
+    claim_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/claim",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"agent_id": agent["id"]},
+    )
+    assert claim_response.status_code == 200
+    assert claim_response.json()["assigned_agent_id"] == agent["id"]
+
+    start_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/start",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert start_response.status_code == 200
+    assert start_response.json()["status"] == "in_progress"
+
+    submit_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/submit",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"content": "Submitted from the browser."},
+    )
+    assert submit_response.status_code == 200
+    assert polis_client.store.tasks[uuid.UUID(task_id)]["status"] == "submitted"
+
+
+def test_task_budget_reserves_and_pays_credits_to_agent_owner(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "budget-owner@example.com",
+            "password": "secret123",
+            "username": "budgetowner",
+        },
+    )
+    agent_owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "budget-agent-owner@example.com",
+            "password": "secret123",
+            "username": "budgetagentowner",
+        },
+    )
+    owner_token = owner_response.json()["token"]
+    agent_owner_token = agent_owner_response.json()["token"]
+    owner_id = uuid.UUID(owner_response.json()["user"]["id"])
+    agent_owner_id = uuid.UUID(agent_owner_response.json()["user"]["id"])
+
+    agent_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
+        json={
+            "name": "credit-worker",
+            "display_name": "Credit Worker",
+            "description": "Completes credit-backed tasks.",
+            "auth_method": "none",
+        },
+    )
+    agent = agent_response.json()
+    agent_token = agent["token"]
+
+    create_response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Credit-backed task",
+            "description": "Reserve budget and pay on completion.",
+            "budget": 25,
+        },
+    )
+    assert create_response.status_code == 200
+    assert polis_client.store.users[owner_id]["credit_balance"] == 75
+    assert polis_client.store.users[agent_owner_id]["credit_balance"] == 100
+
+    task_id = create_response.json()["task_id"]
+    polis_client.post(
+        f"/api/v1/tasks/{task_id}/claim",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    polis_client.post(
+        f"/api/v1/tasks/{task_id}/start",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    polis_client.post(
+        f"/api/v1/tasks/{task_id}/submit",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"content": "done"},
+    )
+    accept_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/accept",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert accept_response.status_code == 200
+    assert polis_client.store.users[owner_id]["credit_balance"] == 75
+    assert polis_client.store.users[agent_owner_id]["credit_balance"] == 125
+    assert polis_client.store.users[agent_owner_id]["reputation"] == 50
+
+
+def test_new_user_credit_default_is_100_in_auth_and_migrations():
+    root = Path(__file__).resolve().parents[2]
+    auth = (root / "backend/app/routes/auth.py").read_text()
+    alembic_schema = (root / "backend/migrations/versions/20260620_polis_v1_schema.py").read_text()
+    legacy_migration = (root / "backend/migrations/006_fix_credit_balance_default.sql").read_text()
+
+    assert "credit_balance=row.get(\"credit_balance\", 100)" in auth
+    assert 'sa.Column("credit_balance", sa.Integer(), nullable=False, server_default="100")' in alembic_schema
+    assert "ALTER TABLE users ALTER COLUMN credit_balance SET DEFAULT 100" in legacy_migration
+
+
 def test_community_posts_comments_likes_and_agent_task_share(polis_client):
     owner_response = polis_client.post(
         "/api/v1/auth/register",
@@ -1146,6 +1383,13 @@ def test_community_posts_comments_likes_and_agent_task_share(polis_client):
     assert unlike.json() == {"liked": False, "likes": 0}
     assert unlike_again.status_code == 200
     assert unlike_again.json() == {"liked": False, "likes": 0}
+
+    delete_response = polis_client.delete(
+        f"/api/v1/community/posts/{post_id}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert delete_response.status_code == 200
+    assert uuid.UUID(post_id) not in polis_client.store.community_posts
 
     share_response = polis_client.post(
         "/api/v1/community/agent/task-share",

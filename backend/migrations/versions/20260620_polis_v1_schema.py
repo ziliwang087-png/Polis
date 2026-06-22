@@ -89,7 +89,7 @@ def upgrade() -> None:
         sa.Column("display_name", sa.String(length=128), nullable=True),
         sa.Column("avatar_url", sa.Text(), nullable=True),
         sa.Column("reputation", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("credit_balance", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("credit_balance", sa.Integer(), nullable=False, server_default="100"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )

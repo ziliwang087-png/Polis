@@ -1,12 +1,15 @@
 """
 Task API routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status, Depends, Query, Header
 from uuid import UUID
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
+import base64
 import hashlib
 import json
 from datetime import datetime
+from fastapi.encoders import jsonable_encoder
+from psycopg2.extras import Json
 from app.models import (
     TaskCreateRequest, TaskCreateResponse,
     TaskListResponse, TaskDetailResponse,
@@ -15,12 +18,14 @@ from app.models import (
     TaskAssignRequest, TaskAssignResponse,
     TaskSubmitRequest, TaskSubmitResponse,
     TaskReviewRequest, TaskReviewResponse,
-    AgentTasksResponse
+    AgentTasksResponse, AttachmentInput, TaskClaimRequest
 )
 from app.database import get_db_connection
 from app.dependencies import get_current_owner, get_current_agent, get_current_user
 from app.fraud_detection import detect_collusion
 from app.services import anti_fraud as anti_fraud_svc
+from app.services import storage
+from app.services.storage import StorageNotConfigured
 from app.routes.notifications import create_notification
 import logging
 
@@ -34,8 +39,55 @@ TASK_LIST_COLUMNS = """
     t.id, t.owner_id, t.title, t.description, t.category, t.difficulty,
     t.reward_points, t.status, t.created_at, t.updated_at, t.completed_at,
     t.deadline, t.assigned_agent_id, t.estimated_hours, t.deliverable_type,
-    t.required_capabilities, t.verification_required
+    t.required_capabilities, t.verification_required, t.attachments
 """
+
+
+def _json(value: Any) -> Json:
+    return Json(jsonable_encoder(value))
+
+
+def _decode_attachment_content(attachment: AttachmentInput) -> bytes:
+    try:
+        return base64.b64decode(attachment.content_base64 or "", validate=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid base64 attachment: {attachment.filename}",
+        ) from exc
+
+
+def _stored_attachments(attachments: List[AttachmentInput], owner_id: UUID) -> List[Dict[str, Any]]:
+    stored: List[Dict[str, Any]] = []
+    for attachment in attachments:
+        mime = attachment.mime or "application/octet-stream"
+        if attachment.content_base64:
+            try:
+                url = storage.upload_bytes(
+                    data=_decode_attachment_content(attachment),
+                    filename=attachment.filename,
+                    content_type=mime,
+                    owner_id=owner_id,
+                )
+            except StorageNotConfigured as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=str(exc),
+                ) from exc
+        elif attachment.url:
+            url = attachment.url
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Attachment {attachment.filename} needs url or content_base64",
+            )
+
+        stored.append({
+            "url": url,
+            "filename": attachment.filename,
+            "mime": mime,
+        })
+    return stored
 
 
 def _task_status_response(row) -> TaskStatusResponse:
@@ -52,6 +104,37 @@ def _ids_equal(left, right) -> bool:
     if left is None or right is None:
         return False
     return str(left) == str(right)
+
+
+def _agent_owned_by_user(cur, agent_id: UUID, user_id: UUID):
+    cur.execute("SELECT * FROM agents WHERE id = %s", (str(agent_id),))
+    agent = cur.fetchone()
+    if not agent or not _ids_equal(agent.get("owner_id"), user_id):
+        raise HTTPException(status_code=403, detail="You do not own this agent")
+    return agent
+
+
+def _resolve_agent_for_token(
+    cur,
+    authorization: Optional[str],
+    requested_agent_id: Optional[UUID] = None,
+    assigned_agent_id: Optional[UUID] = None,
+) -> UUID:
+    subject_id, subject_type = get_current_user(authorization)
+    if subject_type == "agent":
+        if requested_agent_id and not _ids_equal(requested_agent_id, subject_id):
+            raise HTTPException(status_code=403, detail="Agent token does not match requested agent")
+        return subject_id
+
+    if requested_agent_id:
+        _agent_owned_by_user(cur, requested_agent_id, subject_id)
+        return requested_agent_id
+
+    if assigned_agent_id:
+        _agent_owned_by_user(cur, assigned_agent_id, subject_id)
+        return UUID(str(assigned_agent_id))
+
+    raise HTTPException(status_code=403, detail="agent_id is required for user tokens")
 
 
 def _award_task_acceptance(conn, agent_id: UUID):
@@ -80,6 +163,27 @@ def _award_task_acceptance(conn, agent_id: UUID):
     _check_and_award_badges(conn, agent_id)
 
 
+def _pay_task_acceptance(conn, agent_id: UUID, reward_points: int):
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM agents WHERE id = %s", (str(agent_id),))
+    agent = cur.fetchone()
+    if not agent:
+        logger.warning("Accepted task assigned to missing agent %s", agent_id)
+        return
+
+    cur.execute(
+        """
+        UPDATE users
+        SET
+            credit_balance = credit_balance + %s,
+            reputation = reputation + %s,
+            updated_at = NOW()
+        WHERE id = %s
+        """,
+        (int(reward_points or 0), XP_REWARD_ON_ACCEPT, str(agent["owner_id"])),
+    )
+
+
 @router.post("", response_model=TaskCreateResponse)
 def create_task(
     request: TaskCreateRequest,
@@ -90,30 +194,44 @@ def create_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
 
-            # required_capabilities 列是 JSONB —— 用 psycopg2.extras.Json 包一下，
-            # 否则 psycopg2 会把 list 当成 text[] 数组传过去，引发类型不匹配。
-            from psycopg2.extras import Json
             required_capabilities = request.required_capabilities or []
             reward_points = request.budget if request.budget is not None else request.reward_points
             difficulty = request.priority or request.difficulty
+            if reward_points > 0:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET credit_balance = credit_balance - %s, updated_at = NOW()
+                    WHERE id = %s AND credit_balance >= %s
+                    RETURNING credit_balance
+                    """,
+                    (reward_points, str(owner_id), reward_points),
+                )
+                if not cur.fetchone():
+                    raise HTTPException(
+                        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                        detail="Insufficient credit balance",
+                    )
+            attachments = _stored_attachments(request.attachments, owner_id)
 
             cur.execute(
                 """
                 INSERT INTO tasks (
                     owner_id, title, description, category, difficulty,
                     required_capabilities, estimated_hours, reward_points,
-                    deadline, deliverable_type, assigned_agent_id
+                    deadline, deliverable_type, assigned_agent_id, attachments
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, owner_id, title, description, category, difficulty,
                     required_capabilities, estimated_hours, reward_points, status,
                     assigned_agent_id, deadline, created_at, updated_at,
-                    completed_at, deliverable_type, verification_required
+                    completed_at, deliverable_type, verification_required, attachments
                 """,
                 (
                     str(owner_id), request.title, request.description, request.category,
-                    difficulty, Json(required_capabilities), request.estimated_hours,
-                    reward_points, request.deadline, request.deliverable_type, None
+                    difficulty, _json(required_capabilities), request.estimated_hours,
+                    reward_points, request.deadline, request.deliverable_type, None,
+                    _json(attachments),
                 )
             )
             result = cur.fetchone()
@@ -123,6 +241,8 @@ def create_task(
 
             return TaskCreateResponse(task_id=task_id, **dict(result))
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Task creation failed: {e}")
         import traceback
@@ -209,14 +329,16 @@ def pending_tasks(agent_id: UUID = Depends(get_current_agent)):
 @router.post("/{task_id}/claim", response_model=TaskStatusResponse)
 def claim_task(
     task_id: UUID,
-    agent_id: UUID = Depends(get_current_agent),
+    request: Optional[TaskClaimRequest] = None,
+    authorization: Optional[str] = Header(None),
+    agent_id: Optional[UUID] = None,
 ):
     """Agent claims an open task."""
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                "SELECT id, status, assigned_agent_id, owner_id, title, reward_points FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),),
             )
             task = cur.fetchone()
@@ -224,6 +346,13 @@ def claim_task(
                 raise HTTPException(status_code=404, detail="Task not found")
             if task["status"] != "open":
                 raise HTTPException(status_code=409, detail="Task is not open")
+            if agent_id is None:
+                agent_id = _resolve_agent_for_token(
+                    cur,
+                    authorization,
+                    requested_agent_id=request.agent_id if request else None,
+                    assigned_agent_id=task.get("assigned_agent_id"),
+                )
             assigned_agent_id = task.get("assigned_agent_id")
             if assigned_agent_id and not _ids_equal(assigned_agent_id, agent_id):
                 raise HTTPException(status_code=403, detail="Task is reserved for another agent")
@@ -264,7 +393,8 @@ def claim_task(
 @router.post("/{task_id}/start", response_model=TaskStatusResponse)
 def start_task(
     task_id: UUID,
-    agent_id: UUID = Depends(get_current_agent),
+    authorization: Optional[str] = Header(None),
+    agent_id: Optional[UUID] = None,
 ):
     """Assigned agent starts a claimed task."""
     try:
@@ -277,6 +407,12 @@ def start_task(
             task = cur.fetchone()
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
+            if agent_id is None:
+                agent_id = _resolve_agent_for_token(
+                    cur,
+                    authorization,
+                    assigned_agent_id=task.get("assigned_agent_id"),
+                )
             if not _ids_equal(task.get("assigned_agent_id"), agent_id):
                 raise HTTPException(status_code=403, detail="You are not assigned to this task")
             if task["status"] != "claimed":
@@ -353,6 +489,11 @@ def accept_task(
 
             if task.get("assigned_agent_id"):
                 _award_task_acceptance(conn, task["assigned_agent_id"])
+                _pay_task_acceptance(
+                    conn,
+                    task["assigned_agent_id"],
+                    int(task.get("reward_points") or 0),
+                )
 
             create_notification(
                 conn,
@@ -472,7 +613,8 @@ def cancel_task(
 def fail_task(
     task_id: UUID,
     request: TaskFailRequest,
-    agent_id: UUID = Depends(get_current_agent),
+    authorization: Optional[str] = Header(None),
+    agent_id: Optional[UUID] = None,
 ):
     """Agent marks an in-progress task as failed."""
     try:
@@ -485,6 +627,12 @@ def fail_task(
             task = cur.fetchone()
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
+            if agent_id is None:
+                agent_id = _resolve_agent_for_token(
+                    cur,
+                    authorization,
+                    assigned_agent_id=task.get("assigned_agent_id"),
+                )
             if not _ids_equal(task.get("assigned_agent_id"), agent_id):
                 raise HTTPException(status_code=403, detail="You are not assigned to this task")
             if task["status"] != "in_progress":
@@ -709,7 +857,8 @@ def assign_task(
 def submit_task(
     task_id: UUID,
     request: TaskSubmitRequest,
-    agent_id: UUID = Depends(get_current_agent)
+    authorization: Optional[str] = Header(None),
+    agent_id: Optional[UUID] = None,
 ):
     """Agent submits task deliverable"""
     try:
@@ -727,6 +876,12 @@ def submit_task(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Task not found"
+                )
+            if agent_id is None:
+                agent_id = _resolve_agent_for_token(
+                    cur,
+                    authorization,
+                    assigned_agent_id=task.get("assigned_agent_id"),
                 )
             
             if not _ids_equal(task['assigned_agent_id'], agent_id):

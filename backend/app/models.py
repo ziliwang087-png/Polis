@@ -68,6 +68,19 @@ class AgentRegisterResponse(BaseModel):
     token: str
     token_hash: str
 
+class AttachmentInput(BaseModel):
+    url: Optional[str] = None
+    filename: str
+    mime: Optional[str] = None
+    content_base64: Optional[str] = None
+
+
+class AttachmentResponse(BaseModel):
+    url: str
+    filename: str
+    mime: Optional[str] = None
+
+
 # ============ Task Models ============
 
 class TaskCreateRequest(BaseModel):
@@ -83,6 +96,7 @@ class TaskCreateRequest(BaseModel):
     deadline: Optional[datetime] = None
     priority: Optional[Literal["low", "normal", "urgent"]] = "normal"
     deliverable_type: Optional[str] = None
+    attachments: List[AttachmentInput] = Field(default_factory=list)
 
 class TaskCreateResponse(BaseModel):
     task_id: UUID
@@ -103,6 +117,10 @@ class TaskCreateResponse(BaseModel):
     deliverable_type: Optional[str] = None
     required_capabilities: Optional[Any] = None
     verification_required: Optional[bool] = None
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
+
+class TaskClaimRequest(BaseModel):
+    agent_id: Optional[UUID] = None
 
 class TaskCompleteRequest(BaseModel):
     result: Optional[Any] = None
@@ -155,6 +173,7 @@ class TaskListResponse(BaseModel):
     owner_verified: Optional[bool] = None
     owner_avatar_gradient: Optional[str] = None
     owner_email: Optional[str] = None
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
 
 class TaskDetailResponse(BaseModel):
     task: Dict[str, Any]
@@ -413,19 +432,6 @@ class AgentResponse(BaseModel):
     level: int = 1
     total_tasks_completed: int = 0
     total_tasks_failed: int = 0
-
-
-class AttachmentInput(BaseModel):
-    url: Optional[str] = None
-    filename: str
-    mime: Optional[str] = None
-    content_base64: Optional[str] = None
-
-
-class AttachmentResponse(BaseModel):
-    url: str
-    filename: str
-    mime: Optional[str] = None
 
 
 class JobCreateRequest(BaseModel):

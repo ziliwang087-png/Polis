@@ -232,7 +232,7 @@ def delete_post(
         if not row:
             raise HTTPException(status_code=404, detail="Post not found")
         
-        if row[0] != subject_type or str(row[1]) != str(subject_id):
+        if row["author_type"] != subject_type or str(row["author_id"]) != str(subject_id):
             raise HTTPException(status_code=403, detail="Only author can delete this post")
         
         # Delete post (cascades to comments and likes)

@@ -131,6 +131,19 @@ export interface JobAttachment {
   mime: string;
 }
 
+export interface AttachmentInput {
+  url?: string;
+  filename: string;
+  mime?: string;
+  content_base64?: string;
+}
+
+export interface TaskAttachment {
+  url: string;
+  filename: string;
+  mime: string;
+}
+
 export interface Job {
   id: string;
   from_user_id: string;
@@ -254,6 +267,7 @@ export interface Task {
   owner_verified?: boolean | null;
   owner_avatar_gradient?: string | null;
   owner_email?: string | null;
+  attachments: TaskAttachment[];
 }
 
 export interface TaskCreatePayload {
@@ -268,6 +282,7 @@ export interface TaskCreatePayload {
   deadline?: string;
   priority?: 'low' | 'normal' | 'urgent';
   deliverable_type?: string;
+  attachments?: AttachmentInput[];
 }
 
 export interface TaskCreateResponse {
@@ -289,6 +304,7 @@ export interface TaskCreateResponse {
   deliverable_type?: string | null;
   required_capabilities?: string[] | null;
   verification_required?: boolean | null;
+  attachments?: TaskAttachment[];
 }
 
 export interface TaskRating {

@@ -140,7 +140,7 @@ export default function MePage() {
           <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="text-sm font-semibold text-gray-900">Credit 余额</div>
             <p className="mt-1 text-sm leading-6 text-gray-600">
-              Polis 的虚拟货币。发任务会消耗 Credit，完成任务会赚取 Credit，当前未启用扣费。
+              Polis 的虚拟货币。发布带预算的任务会预扣 Credit，任务验收后支付给完成任务的 Agent owner。
             </p>
           </div>
         </div>

@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { agentsApi } from '@/lib/api/agents';
 import { deliverablesApi, tasksApi } from '@/lib/api/tasks';
 import type { Task, TaskStatus } from '@/lib/api/types';
 import { useAuthStore } from '@/lib/store';
@@ -68,6 +70,7 @@ export default function TaskDetailPage() {
   const [submissionText, setSubmissionText] = useState('');
   const [deliverableFile, setDeliverableFile] = useState<File | null>(null);
   const [deliverableDescription, setDeliverableDescription] = useState('');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
 
   const taskQuery = useQuery({
     queryKey: ['tasks', taskId],
@@ -79,6 +82,15 @@ export default function TaskDetailPage() {
 
   const task = unwrapTask(taskQuery.data);
   const currentStep = task ? stepIndex(task.status) : -1;
+
+  const myAgentsQuery = useQuery({
+    queryKey: ['agents', 'mine'],
+    queryFn: () => agentsApi.listMine(),
+    enabled: authed,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const myAgents = myAgentsQuery.data ?? [];
 
   const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
 
@@ -92,7 +104,7 @@ export default function TaskDetailPage() {
 
   const actionMutation = useMutation({
     mutationFn: async (action: 'claim' | 'start' | 'submit' | 'accept' | 'revision' | 'cancel') => {
-      if (action === 'claim') return tasksApi.claim(taskId);
+      if (action === 'claim') return tasksApi.claim(taskId, selectedAgentId);
       if (action === 'start') return tasksApi.start(taskId);
       if (action === 'submit') {
         return tasksApi.submit(taskId, { content: submissionText.trim() || '交付物已提交' });
@@ -172,13 +184,21 @@ export default function TaskDetailPage() {
                 {task.title}
               </h1>
             </div>
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="w-fit rounded-lg bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
-            >
-              返回
-            </button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Link
+                href={`/messages/${task.owner_id}`}
+                className="rounded-lg bg-[#1d4ed8] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#1e40af]"
+              >
+                私信发布者
+              </Link>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="w-fit rounded-lg bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+              >
+                返回
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 border-t border-slate-100 pt-5">
@@ -186,6 +206,26 @@ export default function TaskDetailPage() {
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{task.description}</p>
           </div>
         </section>
+
+        {(task.attachments ?? []).length > 0 && (
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="mb-4 text-lg font-semibold text-slate-950">任务附件</h2>
+            <div className="space-y-3">
+              {task.attachments.map((attachment) => (
+                <a
+                  key={`${attachment.url}-${attachment.filename}`}
+                  href={attachment.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex flex-col gap-1 rounded-lg border border-slate-100 p-4 transition hover:border-[#bfdbfe] hover:bg-[#eff6ff] sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span className="truncate text-sm font-semibold text-slate-950">{attachment.filename}</span>
+                  <span className="text-xs text-slate-500">{attachment.mime || 'application/octet-stream'}</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -230,9 +270,43 @@ export default function TaskDetailPage() {
           <div className="flex flex-wrap gap-3">
             {task.status === 'open' && (
               <>
-                <ActionButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('claim')}>
-                  接单
-                </ActionButton>
+                <div className="w-full rounded-lg bg-slate-50 p-4">
+                  {myAgentsQuery.isLoading ? (
+                    <div className="text-sm text-slate-500">正在加载你的 Agent...</div>
+                  ) : myAgents.length === 0 ? (
+                    <Link
+                      href="/agents/new"
+                      className="inline-flex rounded-lg bg-[#1d4ed8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1e40af]"
+                    >
+                      注册 Agent 后接单
+                    </Link>
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <label className="min-w-0 flex-1">
+                        <span className="mb-1 block text-sm font-medium text-slate-700">选择接单 Agent</span>
+                        <select
+                          value={selectedAgentId}
+                          onChange={(event) => setSelectedAgentId(event.target.value)}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-[#1d4ed8]"
+                        >
+                          <option value="">请选择</option>
+                          {myAgents.map((agent) => (
+                            <option key={agent.id} value={agent.id}>
+                              {agent.display_name || agent.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <ActionButton
+                        pending={actionMutation.isPending}
+                        disabled={!selectedAgentId}
+                        onClick={() => actionMutation.mutate('claim')}
+                      >
+                        接单
+                      </ActionButton>
+                    </div>
+                  )}
+                </div>
                 <GhostButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('cancel')}>
                   取消任务
                 </GhostButton>

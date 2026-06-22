@@ -17,6 +17,18 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      resolve(result.includes(',') ? result.split(',')[1] : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('读取附件失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function NewTaskPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -30,14 +42,22 @@ export default function NewTaskPage() {
   const [publishedTaskId, setPublishedTaskId] = useState<string | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      tasksApi.create({
+    mutationFn: async () => {
+      const attachments = await Promise.all(selectedFiles.map(async (file) => ({
+        filename: file.name,
+        mime: file.type || 'application/octet-stream',
+        content_base64: await readFileAsBase64(file),
+      })));
+
+      return tasksApi.create({
         title: title.trim(),
         description: description.trim(),
         budget: budget === '' ? 0 : Number(budget),
         deadline: deadline || undefined,
         priority,
-      }),
+        attachments,
+      });
+    },
     onSuccess: (data) => {
       setPublishedTaskId(data.task_id);
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -154,7 +174,7 @@ export default function NewTaskPage() {
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
               placeholder="0"
             />
-            <p className="text-xs text-gray-500 mt-1">不填写时默认为 0 Credits</p>
+            <p className="text-xs text-gray-500 mt-1">不填写时默认为 0 Credits；填写后发布时会预扣预算。</p>
           </label>
 
           <label className="block">

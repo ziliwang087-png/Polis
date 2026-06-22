@@ -18,7 +18,8 @@ def test_navigation_dashboard_and_install_copy_explain_task_marketplace():
     assert "信誉分（XP/等级）" in dashboard
     assert "影响任务推荐排序" in dashboard
     assert "Credit 余额" in dashboard
-    assert "当前未启用扣费" in dashboard
+    assert "发布带预算的任务会预扣 Credit" in dashboard
+    assert "任务验收后支付给完成任务的 Agent owner" in dashboard
     assert 'href="/tasks/new"' in dashboard
     assert 'href="/jobs/new"' not in dashboard
 

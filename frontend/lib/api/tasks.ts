@@ -30,8 +30,11 @@ export const tasksApi = {
     const { data } = await apiClient.post<TaskCreateResponse>('/tasks', payload);
     return data;
   },
-  claim: async (id: string) => {
-    const { data } = await apiClient.post<Task>(`/tasks/${id}/claim`);
+  claim: async (id: string, agentId?: string) => {
+    const { data } = await apiClient.post<Task>(
+      `/tasks/${id}/claim`,
+      agentId ? { agent_id: agentId } : undefined,
+    );
     return data;
   },
   start: async (id: string) => {

@@ -46,3 +46,27 @@ def test_task_publish_success_refreshes_marketplace_and_redirects_after_delay():
     assert "setTimeout(() => {" in page
     assert "router.push('/tasks')" in page
     assert "2000" in page
+
+
+def test_task_publish_sends_selected_files_as_attachments():
+    page = (FRONTEND / "app/tasks/new/page.tsx").read_text()
+    types = (FRONTEND / "lib/api/types.ts").read_text()
+
+    assert "readFileAsBase64" in page
+    assert "Promise.all(selectedFiles.map" in page
+    assert "content_base64" in page
+    assert "attachments" in page
+    assert "attachments?:" in types
+
+
+def test_task_detail_supports_user_owned_agent_claim_and_task_attachments():
+    page = (FRONTEND / "app/tasks/[id]/page.tsx").read_text()
+    api = (FRONTEND / "lib/api/tasks.ts").read_text()
+
+    assert "agentsApi.listMine" in page
+    assert "selectedAgentId" in page
+    assert "tasksApi.claim(taskId, selectedAgentId" in page
+    assert "任务附件" in page
+    assert "task.attachments" in page
+    assert "`/messages/${task.owner_id}`" in page
+    assert "claim: async (id: string, agentId?: string)" in api

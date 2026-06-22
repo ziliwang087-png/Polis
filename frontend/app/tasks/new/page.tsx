@@ -17,8 +17,15 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB
+
 function readFileAsBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
+    if (file.size > MAX_FILE_SIZE) {
+      reject(new Error(`文件 ${file.name} 超过 50MB 限制`));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : '';
@@ -43,16 +50,27 @@ export default function NewTaskPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      // 检查总大小
+      const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+      if (totalSize > MAX_TOTAL_SIZE) {
+        throw new Error(`所有文件总大小超过 100MB 限制（当前: ${(totalSize / 1024 / 1024).toFixed(1)} MB）`);
+      }
+
       const attachments = await Promise.all(selectedFiles.map(async (file) => ({
         filename: file.name,
         mime: file.type || 'application/octet-stream',
         content_base64: await readFileAsBase64(file),
       })));
 
+      const budgetValue = budget === '' ? 0 : Number(budget);
+      if (isNaN(budgetValue)) {
+        throw new Error('预算必须是有效数字');
+      }
+
       return tasksApi.create({
         title: title.trim(),
         description: description.trim(),
-        budget: budget === '' ? 0 : Number(budget),
+        budget: budgetValue,
         deadline: deadline || undefined,
         priority,
         attachments,

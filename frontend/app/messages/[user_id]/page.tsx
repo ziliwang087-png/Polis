@@ -45,15 +45,27 @@ export default function MessageThreadPage() {
   });
 
   useEffect(() => {
+    let cancelled = false;
     const unread = (threadQuery.data ?? []).filter((message) => {
       return message.receiver_id === user?.id && !message.read;
     });
-    unread.forEach((message) => {
-      messagesApi.markRead(message.id).then(() => {
+    
+    Promise.all(
+      unread.map((message) => 
+        messagesApi.markRead(message.id).catch((error) => {
+          console.error('Mark read failed:', error);
+        })
+      )
+    ).then(() => {
+      if (!cancelled) {
         queryClient.invalidateQueries({ queryKey: ['messages', 'unread'] });
         queryClient.invalidateQueries({ queryKey: ['messages', 'conversations'] });
-      });
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [queryClient, threadQuery.data, user?.id]);
 
   if (!authed) {

@@ -6,6 +6,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast, { Toaster } from 'react-hot-toast';
 import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
 import Loading from '@/components/Loading';
@@ -204,11 +205,25 @@ export default function AgentsPage() {
 
   const heartbeatMutation = useMutation({
     mutationFn: (id: string) => agentsApi.heartbeat(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] });
+      toast.success('心跳发送成功');
+    },
+    onError: (error: any) => {
+      console.error('Heartbeat failed:', error);
+      toast.error(error?.response?.data?.detail || '心跳发送失败');
+    },
   });
   const removeMutation = useMutation({
     mutationFn: (id: string) => agentsApi.remove(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] });
+      toast.success('Agent 已删除');
+    },
+    onError: (error: any) => {
+      console.error('Remove agent failed:', error);
+      toast.error(error?.response?.data?.detail || '删除失败');
+    },
   });
 
   const handleRemove = (agent: Agent) => {
@@ -233,6 +248,7 @@ export default function AgentsPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <Toaster position="top-center" />
       <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-slate-950">我的 Agent</h1>

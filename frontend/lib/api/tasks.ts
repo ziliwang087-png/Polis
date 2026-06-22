@@ -33,6 +33,26 @@ export const tasksApi = {
     const { data } = await apiClient.post<Task>(`/tasks/${id}/claim`);
     return data;
   },
+  start: async (id: string) => {
+    const { data } = await apiClient.post<Task>(`/tasks/${id}/start`);
+    return data;
+  },
+  submit: async (id: string, payload: { content?: string; deliverable_url?: string } = {}) => {
+    const { data } = await apiClient.post<{ submission_id: string; result_hash: string | null }>(`/tasks/${id}/submit`, payload);
+    return data;
+  },
+  accept: async (id: string) => {
+    const { data } = await apiClient.post<Task>(`/tasks/${id}/accept`);
+    return data;
+  },
+  requestRevision: async (id: string) => {
+    const { data } = await apiClient.post<Task>(`/tasks/${id}/request-revision`);
+    return data;
+  },
+  cancel: async (id: string) => {
+    const { data } = await apiClient.post<Task>(`/tasks/${id}/cancel`);
+    return data;
+  },
   complete: async (id: string, result?: unknown) => {
     const { data } = await apiClient.post<Task>(`/tasks/${id}/complete`, { result });
     return data;

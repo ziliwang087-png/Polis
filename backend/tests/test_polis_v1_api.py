@@ -30,6 +30,7 @@ class FakePolisStore:
         self.agents: dict[uuid.UUID, dict[str, Any]] = {}
         self.agent_skills: dict[uuid.UUID, dict[str, Any]] = {}
         self.tasks: dict[uuid.UUID, dict[str, Any]] = {}
+        self.task_submissions: dict[uuid.UUID, dict[str, Any]] = {}
         self.jobs: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_artifacts: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_ratings: dict[uuid.UUID, dict[str, Any]] = {}
@@ -495,7 +496,13 @@ class FakeCursor:
             self._rows = rows
             return
 
-        if compact.startswith("select id, status, assigned_agent_id") and "from tasks where id = %s for update" in compact:
+        if (
+            compact.startswith("select id, status, assigned_agent_id")
+            and "from tasks where id = %s for update" in compact
+        ) or (
+            compact.startswith("select id, status, assigned_agent_id, owner_id, title")
+            and "from tasks where id = %s for update" in compact
+        ):
             tid = uuid.UUID(str(params[0]))
             row = self.store.tasks.get(tid)
             self._rows = [
@@ -509,11 +516,47 @@ class FakeCursor:
             ] if row else []
             return
 
+        if compact.startswith("select assigned_agent_id, status from tasks where id = %s"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks.get(tid)
+            self._rows = [
+                {
+                    "assigned_agent_id": row["assigned_agent_id"],
+                    "status": row["status"],
+                }
+            ] if row else []
+            return
+
+        if compact.startswith("update tasks set assigned_agent_id = %s, status = 'claimed'"):
+            agent_id, tid = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
+            row = self.store.tasks[tid]
+            row["assigned_agent_id"] = agent_id
+            row["status"] = "claimed"
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
         if compact.startswith("update tasks set assigned_agent_id = %s, status = 'in_progress'"):
             agent_id, tid = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
             row = self.store.tasks[tid]
             row["assigned_agent_id"] = agent_id
             row["status"] = "in_progress"
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
+        if compact.startswith("update tasks set status = 'in_progress'"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks[tid]
+            row["status"] = "in_progress"
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
+        if compact.startswith("update tasks set status = 'submitted'"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks[tid]
+            row["status"] = "submitted"
             row["updated_at"] = self.store.now()
             self._rows = [row]
             return
@@ -545,7 +588,29 @@ class FakeCursor:
             return
 
         if "from task_submissions where task_id = %s" in compact:
-            self._rows = []
+            tid = uuid.UUID(str(params[0]))
+            self._rows = [
+                row for row in self.store.task_submissions.values()
+                if row["task_id"] == tid
+            ]
+            return
+
+        if compact.startswith("insert into task_submissions"):
+            task_id, agent_id, content, deliverable_url, result_hash, evidence_urls, work_log = params[:7]
+            sid = uuid.uuid4()
+            row = {
+                "id": sid,
+                "task_id": uuid.UUID(str(task_id)),
+                "agent_id": uuid.UUID(str(agent_id)),
+                "content": content,
+                "deliverable_url": deliverable_url,
+                "result_hash": result_hash,
+                "evidence_urls": _plain(evidence_urls),
+                "work_log": _plain(work_log),
+                "submitted_at": self.store.now(),
+            }
+            self.store.task_submissions[sid] = row
+            self._rows = [{"id": sid}]
             return
 
         if "from task_ratings" in compact and "select count(*) as count" in compact:
@@ -940,16 +1005,30 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
         headers={"Authorization": f"Bearer {agent_token}"},
     )
     assert claim_response.status_code == 200
-    assert claim_response.json()["status"] == "in_progress"
+    assert claim_response.json()["status"] == "claimed"
     assert claim_response.json()["assigned_agent_id"] == agent["id"]
 
-    complete_response = polis_client.post(
-        f"/api/v1/tasks/{task_id}/complete",
+    start_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/start",
         headers={"Authorization": f"Bearer {agent_token}"},
-        json={"result": {"bullets": ["one", "two", "three"]}},
     )
-    assert complete_response.status_code == 200
-    assert complete_response.json()["status"] == "completed"
+    assert start_response.status_code == 200
+    assert start_response.json()["status"] == "in_progress"
+
+    submit_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/submit",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"content": "one\ntwo\nthree"},
+    )
+    assert submit_response.status_code == 200
+    assert polis_client.store.tasks[uuid.UUID(task_id)]["status"] == "submitted"
+
+    accept_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/accept",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == "completed"
 
     failed_task = polis_client.post(
         "/api/v1/tasks",
@@ -964,6 +1043,11 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
         headers={"Authorization": f"Bearer {agent_token}"},
     )
     assert fail_claim.status_code == 200
+    fail_start = polis_client.post(
+        f"/api/v1/tasks/{failed_task['task_id']}/start",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert fail_start.status_code == 200
 
     fail_response = polis_client.post(
         f"/api/v1/tasks/{failed_task['task_id']}/fail",

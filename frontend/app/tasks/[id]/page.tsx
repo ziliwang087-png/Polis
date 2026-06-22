@@ -1,213 +1,354 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '@/lib/api/tasks';
-import type { Task } from '@/lib/api/types';
+import type { Task, TaskStatus } from '@/lib/api/types';
+
+const STATUS_STEPS: Array<{ status: TaskStatus; label: string }> = [
+  { status: 'open', label: '已发布' },
+  { status: 'claimed', label: '已接单' },
+  { status: 'in_progress', label: '进行中' },
+  { status: 'submitted', label: '已提交' },
+  { status: 'completed', label: '已完成' },
+];
+
+const STATUS_LABEL: Record<TaskStatus, string> = {
+  open: '已发布',
+  claimed: '已接单',
+  in_progress: '进行中',
+  submitted: '已提交',
+  completed: '已完成',
+  cancelled: '已取消',
+  failed: '失败',
+};
+
+const STATUS_CLASS: Record<TaskStatus, string> = {
+  open: 'bg-emerald-50 text-emerald-700',
+  claimed: 'bg-sky-50 text-sky-700',
+  in_progress: 'bg-blue-50 text-[#1d4ed8]',
+  submitted: 'bg-amber-50 text-amber-700',
+  completed: 'bg-slate-100 text-slate-700',
+  cancelled: 'bg-slate-100 text-slate-500',
+  failed: 'bg-red-50 text-red-700',
+};
+
+type TaskDetailPayload = Task | { task: Task; submission?: unknown; applications?: unknown[]; review?: unknown };
+
+function unwrapTask(payload: TaskDetailPayload | undefined): Task | null {
+  if (!payload) return null;
+  if ('task' in payload) return payload.task;
+  return payload;
+}
+
+function stepIndex(status: TaskStatus) {
+  if (status === 'cancelled' || status === 'failed') return -1;
+  return STATUS_STEPS.findIndex((step) => step.status === status);
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return '未设置';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '待确认';
+  return date.toLocaleString('zh-CN');
+}
 
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const taskId = params.id as string;
 
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [submissionText, setSubmissionText] = useState('');
 
   const taskQuery = useQuery({
     queryKey: ['tasks', taskId],
-    queryFn: () => tasksApi.get(taskId),
+    queryFn: () => tasksApi.get(taskId) as Promise<TaskDetailPayload>,
     enabled: Boolean(taskId),
     retry: 1,
     staleTime: 30_000,
   });
 
-  const task = taskQuery.data ?? null;
+  const task = unwrapTask(taskQuery.data);
+  const currentStep = task ? stepIndex(task.status) : -1;
 
-  const handleRate = async () => {
-    if (rating === 0) {
-      alert('请选择评分');
-      return;
-    }
+  const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
 
-      setSubmitting(true);
-    try {
-      await tasksApi.rate(taskId, rating, comment);
-      alert('评分成功！');
-      await taskQuery.refetch();
-    } catch (error) {
-      console.error('评分失败:', error);
-      alert('评分失败');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const actionMutation = useMutation({
+    mutationFn: async (action: 'claim' | 'start' | 'submit' | 'accept' | 'revision' | 'cancel') => {
+      if (action === 'claim') return tasksApi.claim(taskId);
+      if (action === 'start') return tasksApi.start(taskId);
+      if (action === 'submit') {
+        return tasksApi.submit(taskId, { content: submissionText.trim() || '交付物已提交' });
+      }
+      if (action === 'accept') return tasksApi.accept(taskId);
+      if (action === 'revision') return tasksApi.requestRevision(taskId);
+      return tasksApi.cancel(taskId);
+    },
+    onSuccess: () => {
+      setSubmissionText('');
+      invalidateTask();
+    },
+  });
+
+  const rateMutation = useMutation({
+    mutationFn: () => tasksApi.rate(taskId, rating, comment),
+    onSuccess: () => invalidateTask(),
+  });
+
+  const actionError = useMemo(() => {
+    const error = actionMutation.error as { response?: { data?: { detail?: string } } } | null;
+    return error?.response?.data?.detail || null;
+  }, [actionMutation.error]);
 
   if (taskQuery.isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-600">加载中...</div>
-      </div>
+      <main className="min-h-[100dvh] bg-[#f6f8fb] px-4 py-10">
+        <div className="mx-auto max-w-5xl rounded-lg bg-white p-10 text-center text-slate-500 shadow-sm">
+          加载中...
+        </div>
+      </main>
     );
   }
 
   if (!task) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-600">任务不存在</div>
-      </div>
+      <main className="min-h-[100dvh] bg-[#f6f8fb] px-4 py-10">
+        <div className="mx-auto max-w-5xl rounded-lg bg-white p-10 text-center text-slate-500 shadow-sm">
+          任务不存在
+        </div>
+      </main>
     );
   }
 
-  const statusColors: Record<Task['status'], string> = {
-    open: 'bg-green-100 text-green-800',
-    in_progress: 'bg-blue-100 text-blue-800',
-    completed: 'bg-purple-100 text-purple-800',
-    failed: 'bg-red-100 text-red-800',
-    submitted: 'bg-yellow-100 text-yellow-800',
-  };
-
-  const statusText: Record<Task['status'], string> = {
-    open: '待接单',
-    in_progress: '进行中',
-    completed: '已完成',
-    failed: '已失败',
-    submitted: '已提交',
-  };
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto py-8 px-4">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{task.title}</h1>
-              <div className="flex items-center gap-3 text-sm text-gray-600">
-                <span className={`px-3 py-1 rounded-full font-medium ${statusColors[task.status]}`}>
-                  {statusText[task.status]}
+    <main className="min-h-[100dvh] bg-[#f6f8fb] px-4 pb-16 pt-8 text-slate-950 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_CLASS[task.status]}`}>
+                  {STATUS_LABEL[task.status]}
                 </span>
-                <span>分类: {task.category}</span>
-                {task.difficulty && <span>难度: {task.difficulty}</span>}
-                <span>奖励: {task.reward_points} 积分</span>
+                <span className="text-slate-500">分类: {task.category}</span>
+                {task.difficulty && <span className="text-slate-500">优先级: {task.difficulty}</span>}
+                <span className="text-slate-500">奖励: {task.reward_points} 积分</span>
               </div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
+                {task.title}
+              </h1>
             </div>
             <button
+              type="button"
               onClick={() => router.back()}
-              className="text-gray-600 hover:text-gray-900"
+              className="w-fit rounded-lg bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
             >
               返回
             </button>
           </div>
 
-          <div className="prose max-w-none">
-            <h3 className="text-lg font-semibold mb-2">任务描述</h3>
-            <p className="text-gray-700 whitespace-pre-wrap">{task.description}</p>
+          <div className="mt-6 border-t border-slate-100 pt-5">
+            <h2 className="text-sm font-semibold text-slate-900">任务描述</h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{task.description}</p>
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-slate-950">任务状态</h2>
+            <span className="text-sm text-slate-500">{STATUS_LABEL[task.status]}</span>
           </div>
 
-          {task.required_capabilities && task.required_capabilities.length > 0 && (
-            <div className="mt-4">
-              <h3 className="text-sm font-semibold mb-2">所需能力</h3>
-              <div className="flex flex-wrap gap-2">
-                {task.required_capabilities.map((cap, idx) => (
-                  <span
-                    key={idx}
-                    className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
-                  >
-                    {cap}
-                  </span>
-                ))}
-              </div>
+          <div className="grid gap-3 md:grid-cols-5">
+            {STATUS_STEPS.map((step, index) => {
+              const done = currentStep >= index;
+              const active = currentStep === index;
+              return (
+                <div
+                  key={step.status}
+                  className={`rounded-lg border p-3 ${
+                    active
+                      ? 'border-[#bfdbfe] bg-[#eff6ff]'
+                      : done
+                        ? 'border-emerald-100 bg-emerald-50'
+                        : 'border-slate-100 bg-slate-50'
+                  }`}
+                >
+                  <div className={`mb-2 h-2 rounded-full ${done ? 'bg-[#1d4ed8]' : 'bg-slate-200'}`} />
+                  <div className="text-sm font-semibold text-slate-900">{step.label}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {(task.status === 'cancelled' || task.status === 'failed') && (
+            <div className="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+              这个任务已经结束，不能继续推进状态。
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Agent Info */}
-        {task.assigned_agent_id && (
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-3">接单 Agent</h2>
-            <div className="text-gray-700">
-              <p>Agent ID: {task.assigned_agent_id}</p>
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <h2 className="mb-4 text-lg font-semibold text-slate-950">操作</h2>
+          {actionError && (
+            <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">{actionError}</div>
+          )}
+          <div className="flex flex-wrap gap-3">
+            {task.status === 'open' && (
+              <>
+                <ActionButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('claim')}>
+                  接单
+                </ActionButton>
+                <GhostButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('cancel')}>
+                  取消任务
+                </GhostButton>
+              </>
+            )}
+            {task.status === 'claimed' && (
+              <ActionButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('start')}>
+                开始工作
+              </ActionButton>
+            )}
+            {task.status === 'in_progress' && (
+              <div className="w-full space-y-3">
+                <label className="block">
+                  <span className="mb-1 block text-sm font-medium text-slate-700">提交说明</span>
+                  <textarea
+                    value={submissionText}
+                    onChange={(event) => setSubmissionText(event.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[#1d4ed8]"
+                    placeholder="说明交付内容、文件链接或验收要点。"
+                  />
+                </label>
+                <ActionButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('submit')}>
+                  提交交付物
+                </ActionButton>
+              </div>
+            )}
+            {task.status === 'submitted' && (
+              <>
+                <ActionButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('accept')}>
+                  验收通过
+                </ActionButton>
+                <GhostButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('revision')}>
+                  打回重做
+                </GhostButton>
+              </>
+            )}
+            {task.status === 'completed' && (
+              <div className="w-full rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+                任务已完成。发布者可以继续补充评分。
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="mb-4 text-lg font-semibold text-slate-950">时间线</h2>
+            <div className="space-y-2 text-sm text-slate-600">
+              <div>创建时间: {formatDateTime(task.created_at)}</div>
+              <div>更新时间: {formatDateTime(task.updated_at)}</div>
+              <div>完成时间: {formatDateTime(task.completed_at)}</div>
+              <div>截止时间: {formatDateTime(task.deadline)}</div>
             </div>
           </div>
-        )}
 
-        {/* Timeline */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-3">时间线</h2>
-          <div className="space-y-2 text-sm text-gray-600">
-            <div>创建时间: {new Date(task.created_at).toLocaleString('zh-CN')}</div>
-            {task.updated_at && (
-              <div>更新时间: {new Date(task.updated_at).toLocaleString('zh-CN')}</div>
-            )}
-            {task.completed_at && (
-              <div>完成时间: {new Date(task.completed_at).toLocaleString('zh-CN')}</div>
-            )}
-            {task.deadline && (
-              <div>截止时间: {new Date(task.deadline).toLocaleString('zh-CN')}</div>
-            )}
-          </div>
-        </div>
+          {task.assigned_agent_id && (
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+              <h2 className="mb-3 text-lg font-semibold text-slate-950">接单 Agent</h2>
+              <p className="break-all text-sm text-slate-600">{task.assigned_agent_id}</p>
+            </div>
+          )}
+        </section>
 
-        {/* Rating Section - Only for completed tasks */}
         {task.status === 'completed' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">给任务评分</h2>
-
-            {/* Star Rating */}
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="mb-4 text-lg font-semibold text-slate-950">给任务评分</h2>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                评分 (1-5 星)
-              </label>
+              <label className="mb-2 block text-sm font-medium text-slate-700">评分 (1-5 星)</label>
               <div className="flex gap-2">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     key={star}
+                    type="button"
                     onClick={() => setRating(star)}
-                    className={`text-3xl ${
-                      star <= rating ? 'text-yellow-400' : 'text-gray-300'
-                    } hover:text-yellow-400 transition-colors`}
+                    className={`text-3xl transition ${star <= rating ? 'text-amber-400' : 'text-slate-300'}`}
                   >
                     ★
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* Comment */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                评价（可选）
-              </label>
+            <label className="mb-4 block">
+              <span className="mb-2 block text-sm font-medium text-slate-700">评价（可选）</span>
               <textarea
                 value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onChange={(event) => setComment(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[#1d4ed8]"
                 rows={4}
                 placeholder="说说你的感受..."
               />
-            </div>
-
-            {/* Submit Button */}
-            <button
-              onClick={handleRate}
-              disabled={submitting || rating === 0}
-              className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            </label>
+            <ActionButton
+              pending={rateMutation.isPending}
+              disabled={rating === 0}
+              onClick={() => rateMutation.mutate()}
             >
-              {submitting ? '提交中...' : '提交评分'}
-            </button>
-          </div>
-        )}
-
-        {/* Failed Info */}
-        {task.status === 'failed' && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-red-900 mb-2">任务失败</h2>
-            <p className="text-red-700">该任务执行失败，请查看错误信息或联系 Agent。</p>
-          </div>
+              提交评分
+            </ActionButton>
+          </section>
         )}
       </div>
-    </div>
+    </main>
+  );
+}
+
+function ActionButton({
+  children,
+  pending,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  pending: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending || disabled}
+      className="inline-flex items-center justify-center rounded-lg bg-[#1d4ed8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1e40af] active:translate-y-px disabled:opacity-60"
+    >
+      {pending ? '处理中...' : children}
+    </button>
+  );
+}
+
+function GhostButton({
+  children,
+  pending,
+  onClick,
+}: {
+  children: React.ReactNode;
+  pending: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      className="inline-flex items-center justify-center rounded-lg bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 active:translate-y-px disabled:opacity-60"
+    >
+      {children}
+    </button>
   );
 }

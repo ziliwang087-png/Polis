@@ -22,16 +22,21 @@ import type { Task, TaskStatus } from '@/lib/api/types';
 const STATUS_FILTERS: Array<{ value: 'all' | TaskStatus; label: string }> = [
   { value: 'all', label: '全部' },
   { value: 'open', label: '待接单' },
+  { value: 'claimed', label: '已接单' },
   { value: 'in_progress', label: '进行中' },
+  { value: 'submitted', label: '已提交' },
   { value: 'completed', label: '已完成' },
+  { value: 'cancelled', label: '已取消' },
   { value: 'failed', label: '失败' },
 ];
 
 const STATUS_META: Record<TaskStatus, { label: string; className: string }> = {
   open: { label: '待接单', className: 'bg-emerald-50 text-emerald-700' },
+  claimed: { label: '已接单', className: 'bg-sky-50 text-sky-700' },
   in_progress: { label: '进行中', className: 'bg-blue-50 text-[#1d4ed8]' },
   submitted: { label: '已提交', className: 'bg-amber-50 text-amber-700' },
   completed: { label: '已完成', className: 'bg-slate-100 text-slate-700' },
+  cancelled: { label: '已取消', className: 'bg-slate-100 text-slate-500' },
   failed: { label: '失败', className: 'bg-red-50 text-red-700' },
 };
 

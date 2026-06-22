@@ -51,9 +51,11 @@ function agentScore(agent: Agent) {
 
 const TASK_STATUS: Record<TaskStatus, string> = {
   open: '待接单',
+  claimed: '已接单',
   in_progress: '进行中',
   submitted: '已提交',
   completed: '已完成',
+  cancelled: '已取消',
   failed: '失败',
 };
 

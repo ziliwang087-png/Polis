@@ -27,6 +27,8 @@ import logging
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 logger = logging.getLogger(__name__)
 
+XP_REWARD_ON_ACCEPT = 50
+
 
 TASK_LIST_COLUMNS = """
     t.id, t.owner_id, t.title, t.description, t.category, t.difficulty,
@@ -44,6 +46,38 @@ def _task_status_response(row) -> TaskStatusResponse:
         updated_at=row.get("updated_at"),
         completed_at=row.get("completed_at"),
     )
+
+
+def _ids_equal(left, right) -> bool:
+    if left is None or right is None:
+        return False
+    return str(left) == str(right)
+
+
+def _award_task_acceptance(conn, agent_id: UUID):
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE agents
+        SET
+            xp = xp + %s,
+            level = FLOOR((xp + %s) / 100.0) + 1,
+            total_tasks_completed = total_tasks_completed + 1
+        WHERE id = %s
+        RETURNING xp, level, total_tasks_completed
+        """,
+        (XP_REWARD_ON_ACCEPT, XP_REWARD_ON_ACCEPT, str(agent_id)),
+    )
+    agent_stats = cur.fetchone()
+    if agent_stats:
+        logger.info(
+            "Agent %s gained %s XP, now level %s with %s XP",
+            agent_id,
+            XP_REWARD_ON_ACCEPT,
+            agent_stats["level"],
+            agent_stats["xp"],
+        )
+    _check_and_award_badges(conn, agent_id)
 
 
 @router.post("", response_model=TaskCreateResponse)
@@ -179,7 +213,7 @@ def claim_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, status, assigned_agent_id FROM tasks WHERE id = %s FOR UPDATE",
+                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),),
             )
             task = cur.fetchone()
@@ -188,13 +222,13 @@ def claim_task(
             if task["status"] != "open":
                 raise HTTPException(status_code=409, detail="Task is not open")
             assigned_agent_id = task.get("assigned_agent_id")
-            if assigned_agent_id and assigned_agent_id != agent_id:
+            if assigned_agent_id and not _ids_equal(assigned_agent_id, agent_id):
                 raise HTTPException(status_code=403, detail="Task is reserved for another agent")
 
             cur.execute(
                 """
                 UPDATE tasks
-                SET assigned_agent_id = %s, status = 'in_progress', updated_at = NOW()
+                SET assigned_agent_id = %s, status = 'claimed', updated_at = NOW()
                 WHERE id = %s
                 RETURNING id, status, assigned_agent_id, updated_at, completed_at, owner_id, title
                 """,
@@ -224,13 +258,12 @@ def claim_task(
         )
 
 
-@router.post("/{task_id}/complete", response_model=TaskStatusResponse)
-def complete_task(
+@router.post("/{task_id}/start", response_model=TaskStatusResponse)
+def start_task(
     task_id: UUID,
-    request: TaskCompleteRequest,
     agent_id: UUID = Depends(get_current_agent),
 ):
-    """Agent marks an in-progress task as completed."""
+    """Assigned agent starts a claimed task."""
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -241,10 +274,68 @@ def complete_task(
             task = cur.fetchone()
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
-            if task.get("assigned_agent_id") != agent_id:
+            if not _ids_equal(task.get("assigned_agent_id"), agent_id):
                 raise HTTPException(status_code=403, detail="You are not assigned to this task")
-            if task["status"] != "in_progress":
-                raise HTTPException(status_code=409, detail="Task is not in progress")
+            if task["status"] != "claimed":
+                raise HTTPException(status_code=409, detail="Task is not claimed")
+
+            cur.execute(
+                """
+                UPDATE tasks
+                SET status = 'in_progress', updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, status, assigned_agent_id, updated_at, completed_at
+                """,
+                (str(task_id),),
+            )
+            updated_task = cur.fetchone()
+
+            logger.info(f"Task {task_id} started by agent {agent_id}")
+            return _task_status_response(updated_task)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task start failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task start failed",
+        )
+
+
+@router.post("/{task_id}/complete", response_model=TaskStatusResponse)
+def complete_task(
+    task_id: UUID,
+    request: TaskCompleteRequest,
+    agent_id: UUID = Depends(get_current_agent),
+):
+    """Deprecated: agents submit work; owners accept submitted work."""
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Agents cannot complete tasks directly. Submit deliverables, then the task owner accepts them.",
+    )
+
+
+@router.post("/{task_id}/accept", response_model=TaskStatusResponse)
+def accept_task(
+    task_id: UUID,
+    owner_id: UUID = Depends(get_current_owner),
+):
+    """Owner accepts a submitted task and marks it completed."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if not _ids_equal(task.get("owner_id"), owner_id):
+                raise HTTPException(status_code=403, detail="You don't own this task")
+            if task["status"] != "submitted":
+                raise HTTPException(status_code=409, detail="Task is not submitted")
 
             cur.execute(
                 """
@@ -255,50 +346,122 @@ def complete_task(
                 """,
                 (str(task_id),),
             )
-            updated_task = cur.fetchone()  # 立即保存任务更新结果
+            updated_task = cur.fetchone()
 
-            # 奖励 XP 并更新游戏化数据
-            xp_reward = 50  # 完成任务奖励 50 XP
-            cur.execute(
-                """
-                UPDATE agents
-                SET 
-                    xp = xp + %s,
-                    level = FLOOR((xp + %s) / 100.0) + 1,
-                    total_tasks_completed = total_tasks_completed + 1
-                WHERE id = %s
-                RETURNING xp, level, total_tasks_completed
-                """,
-                (xp_reward, xp_reward, str(agent_id))
-            )
-            agent_stats = cur.fetchone()
-            logger.info(f"Agent {agent_id} gained {xp_reward} XP, now at level {agent_stats['level']} with {agent_stats['xp']} XP")
+            if task.get("assigned_agent_id"):
+                _award_task_acceptance(conn, task["assigned_agent_id"])
 
-            # 检查并授予徽章
-            _check_and_award_badges(conn, agent_id)
-
-            # 通知任务发布者
             create_notification(
                 conn,
-                task['owner_id'],
-                'task_completed',
-                '任务已完成',
-                f'您的任务「{task["title"]}」已完成，请查看并评分',
-                f'/tasks/{task_id}'
+                task["owner_id"],
+                "task_completed",
+                "任务已验收",
+                f"任务「{task['title']}」已验收通过",
+                f"/tasks/{task_id}",
             )
 
-            logger.info(f"Task {task_id} completed by agent {agent_id}")
+            logger.info(f"Task {task_id} accepted by owner {owner_id}")
             return _task_status_response(updated_task)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Task completion failed: {e}")
+        logger.error(f"Task acceptance failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Task completion failed",
+            detail="Task acceptance failed",
+        )
+
+
+@router.post("/{task_id}/request-revision", response_model=TaskStatusResponse)
+def request_revision_task(
+    task_id: UUID,
+    owner_id: UUID = Depends(get_current_owner),
+):
+    """Owner sends a submitted task back to in-progress."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if not _ids_equal(task.get("owner_id"), owner_id):
+                raise HTTPException(status_code=403, detail="You don't own this task")
+            if task["status"] != "submitted":
+                raise HTTPException(status_code=409, detail="Task is not submitted")
+
+            cur.execute(
+                """
+                UPDATE tasks
+                SET status = 'in_progress', updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, status, assigned_agent_id, updated_at, completed_at
+                """,
+                (str(task_id),),
+            )
+            updated_task = cur.fetchone()
+
+            logger.info(f"Task {task_id} sent back for revision by owner {owner_id}")
+            return _task_status_response(updated_task)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task revision request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task revision request failed",
+        )
+
+
+@router.post("/{task_id}/cancel", response_model=TaskStatusResponse)
+def cancel_task(
+    task_id: UUID,
+    owner_id: UUID = Depends(get_current_owner),
+):
+    """Owner cancels a task that is not completed."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if not _ids_equal(task.get("owner_id"), owner_id):
+                raise HTTPException(status_code=403, detail="You don't own this task")
+            if task["status"] == "completed":
+                raise HTTPException(status_code=409, detail="Completed tasks cannot be cancelled")
+
+            cur.execute(
+                """
+                UPDATE tasks
+                SET status = 'cancelled', updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, status, assigned_agent_id, updated_at, completed_at
+                """,
+                (str(task_id),),
+            )
+            updated_task = cur.fetchone()
+
+            logger.info(f"Task {task_id} cancelled by owner {owner_id}")
+            return _task_status_response(updated_task)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task cancellation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task cancellation failed",
         )
 
 
@@ -319,7 +482,7 @@ def fail_task(
             task = cur.fetchone()
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
-            if task.get("assigned_agent_id") != agent_id:
+            if not _ids_equal(task.get("assigned_agent_id"), agent_id):
                 raise HTTPException(status_code=403, detail="You are not assigned to this task")
             if task["status"] != "in_progress":
                 raise HTTPException(status_code=409, detail="Task is not in progress")
@@ -500,7 +663,7 @@ def assign_task(
             cur.execute(
                 """
                 UPDATE tasks 
-                SET assigned_agent_id = %s, status = 'in_progress', updated_at = NOW()
+                SET assigned_agent_id = %s, status = 'claimed', updated_at = NOW()
                 WHERE id = %s
                 """,
                 (request.agent_id, task_id)
@@ -563,10 +726,15 @@ def submit_task(
                     detail="Task not found"
                 )
             
-            if task['assigned_agent_id'] != agent_id:
+            if not _ids_equal(task['assigned_agent_id'], agent_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You are not assigned to this task"
+                )
+            if task["status"] != "in_progress":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Task is not in progress"
                 )
             
             # Calculate hash if content provided

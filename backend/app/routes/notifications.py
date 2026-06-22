@@ -44,9 +44,11 @@ def list_notifications(
 
     except Exception as e:
         logger.error(f"Notification listing failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Notification listing failed"
+            detail=f"Notification listing failed: {str(e)}"
         )
 
 

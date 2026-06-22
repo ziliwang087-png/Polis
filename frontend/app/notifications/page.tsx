@@ -3,11 +3,10 @@
  */
 'use client';
 
-import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Loading from '@/components/Loading';
-import { BellIcon, CheckIcon, TrashIcon } from '@/components/icons/Icon';
-import { notificationsApi } from '@/lib/api/notifications';
+import { CheckIcon, MessageIcon } from '@/components/icons/Icon';
+import { notificationsApi } from '@/lib/api/tasks';
 import { useAuthStore } from '@/lib/store';
 import { relativeTime } from '@/lib/format';
 import type { Notification } from '@/lib/api/types';
@@ -15,8 +14,32 @@ import type { Notification } from '@/lib/api/types';
 export default function NotificationsPage() {
   const { isAuthenticated } = useAuthStore();
   const queryClient = useQueryClient();
+  const authed = isAuthenticated();
 
-  if (!isAuthenticated()) {
+  const { data: notifications, isLoading } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => notificationsApi.list(),
+    enabled: authed,
+    refetchInterval: 30_000, // 30 秒自动刷新
+  });
+
+  const markAsReadMutation = useMutation({
+    mutationFn: (id: string) => notificationsApi.markRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
+    },
+  });
+
+  const markAllReadMutation = useMutation({
+    mutationFn: notificationsApi.markAllRead,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
+    },
+  });
+
+  if (!authed) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -25,26 +48,6 @@ export default function NotificationsPage() {
       </div>
     );
   }
-
-  const { data: notifications, isLoading } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: () => notificationsApi.list(),
-    refetchInterval: 30_000, // 30 秒自动刷新
-  });
-
-  const markAsReadMutation = useMutation({
-    mutationFn: (id: string) => notificationsApi.markAsRead(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => notificationsApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-  });
 
   if (isLoading) {
     return <Loading />;
@@ -58,7 +61,7 @@ export default function NotificationsPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <BellIcon className="w-8 h-8 text-blue-400" />
+            <MessageIcon className="w-8 h-8 text-blue-400" />
             <div>
               <h1 className="text-3xl font-bold">通知中心</h1>
               {unreadCount > 0 && (
@@ -72,9 +75,7 @@ export default function NotificationsPage() {
           {notifications && notifications.length > 0 && (
             <button
               onClick={() => {
-                notifications
-                  .filter((n) => !n.read)
-                  .forEach((n) => markAsReadMutation.mutate(n.id));
+                markAllReadMutation.mutate();
               }}
               className="text-sm text-blue-400 hover:text-blue-300"
             >
@@ -86,7 +87,7 @@ export default function NotificationsPage() {
         {/* Notifications List */}
         {!notifications || notifications.length === 0 ? (
           <div className="text-center py-16">
-            <BellIcon className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+            <MessageIcon className="w-16 h-16 text-gray-600 mx-auto mb-4" />
             <p className="text-gray-400">暂无通知</p>
           </div>
         ) : (
@@ -96,7 +97,6 @@ export default function NotificationsPage() {
                 key={notification.id}
                 notification={notification}
                 onMarkAsRead={() => markAsReadMutation.mutate(notification.id)}
-                onDelete={() => deleteMutation.mutate(notification.id)}
               />
             ))}
           </div>
@@ -109,11 +109,9 @@ export default function NotificationsPage() {
 function NotificationItem({
   notification,
   onMarkAsRead,
-  onDelete,
 }: {
   notification: Notification;
   onMarkAsRead: () => void;
-  onDelete: () => void;
 }) {
   return (
     <div
@@ -132,7 +130,7 @@ function NotificationItem({
             <h3 className="font-medium">{notification.title}</h3>
           </div>
 
-          <p className="text-sm text-gray-400 mb-2">{notification.content}</p>
+          <p className="text-sm text-gray-400 mb-2">{notification.message}</p>
 
           <p className="text-xs text-gray-500">
             {relativeTime(notification.created_at)}
@@ -150,13 +148,6 @@ function NotificationItem({
             </button>
           )}
 
-          <button
-            onClick={onDelete}
-            className="p-2 text-gray-400 hover:text-red-400 transition-colors"
-            title="删除"
-          >
-            <TrashIcon className="w-5 h-5" />
-          </button>
         </div>
       </div>
     </div>

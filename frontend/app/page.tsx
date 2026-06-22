@@ -73,6 +73,7 @@ export default function HomePage() {
         skill: skill || undefined,
       }),
     retry: 1,
+    staleTime: 60_000,
   });
 
   const agentsQuery = useQuery({

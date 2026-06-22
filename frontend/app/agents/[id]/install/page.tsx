@@ -109,6 +109,7 @@ export default function AgentInstallPage({
     queryKey: ['agents', id],
     queryFn: () => agentsApi.get(id),
     enabled: isAuthenticated(),
+    staleTime: 60_000,
   });
 
   const tokenMutation = useMutation({

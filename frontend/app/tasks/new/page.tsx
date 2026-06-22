@@ -23,6 +23,7 @@ export default function NewTaskPage() {
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
     enabled: isAuthenticated(),
+    staleTime: 60_000,
   });
 
   const createMutation = useMutation({

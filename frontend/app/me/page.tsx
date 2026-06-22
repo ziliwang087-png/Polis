@@ -27,6 +27,7 @@ export default function MePage() {
     queryKey: ['me'],
     queryFn: () => authApi.me(),
     enabled: isAuthenticated(),
+    staleTime: 30_000,
   });
   useEffect(() => {
     if (profile.data) setUser(profile.data);
@@ -36,6 +37,7 @@ export default function MePage() {
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
     enabled: isAuthenticated(),
+    staleTime: 60_000,
   });
 
   const myAgentIdSet = useMemo(

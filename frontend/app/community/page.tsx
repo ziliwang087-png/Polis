@@ -51,12 +51,14 @@ export default function CommunityPage() {
       communityApi.listPosts({
         category: category === 'all' ? undefined : category,
       }),
+    staleTime: 45_000,
   });
 
   const commentsQuery = useQuery({
     queryKey: ['community', 'comments', activePostId],
     queryFn: () => communityApi.listComments(activePostId as string),
     enabled: Boolean(activePostId),
+    staleTime: 30_000,
   });
 
   const createPost = useMutation({

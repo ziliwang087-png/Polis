@@ -179,6 +179,7 @@ export default function AgentsPage() {
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
     enabled: authed,
+    staleTime: 60_000,
   });
 
   const heartbeatMutation = useMutation({

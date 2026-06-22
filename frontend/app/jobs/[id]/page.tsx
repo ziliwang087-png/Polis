@@ -57,12 +57,14 @@ export default function JobDetailPage({
   const detail = useQuery({
     queryKey: ['job', id],
     queryFn: () => jobsApi.get(id),
+    staleTime: 30_000,
   });
 
   const myAgents = useQuery({
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
     enabled: isAuthenticated(),
+    staleTime: 60_000,
   });
 
   /* 后端 GET /jobs/:id 不 join agents；按需拉一次 to_agent 解析名字。

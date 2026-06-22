@@ -20,6 +20,7 @@ export default function TaskDetailPage() {
     queryFn: () => tasksApi.get(taskId),
     enabled: Boolean(taskId),
     retry: 1,
+    staleTime: 30_000,
   });
 
   const task = taskQuery.data ?? null;

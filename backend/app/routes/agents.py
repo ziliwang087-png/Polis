@@ -55,6 +55,11 @@ def _agent_response(row, skills: Optional[List[Dict[str, Any]]] = None, token: O
         updated_at=row["updated_at"],
         token=token,
         skills=skills or [],
+        # 游戏化字段
+        xp=row.get("xp", 0),
+        level=row.get("level", 1),
+        total_tasks_completed=row.get("total_tasks_completed", 0),
+        total_tasks_failed=row.get("total_tasks_failed", 0),
     )
 
 

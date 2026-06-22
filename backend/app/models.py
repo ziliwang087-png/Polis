@@ -389,6 +389,11 @@ class AgentResponse(BaseModel):
     updated_at: datetime
     token: Optional[str] = None
     skills: List[Dict[str, Any]] = Field(default_factory=list)
+    # 游戏化字段
+    xp: int = 0
+    level: int = 1
+    total_tasks_completed: int = 0
+    total_tasks_failed: int = 0
 
 
 class AttachmentInput(BaseModel):

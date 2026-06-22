@@ -10,7 +10,7 @@ from typing import Union
 from alembic import op
 
 
-revision: str = "20260622_task_attachments_credits"
+revision: str = "20260622_attachments_credits"
 down_revision: Union[str, None] = "20260622_messages"
 branch_labels = None
 depends_on = None

@@ -249,6 +249,26 @@ def complete_task(
                 (str(task_id),),
             )
 
+            # 奖励 XP 并更新游戏化数据
+            xp_reward = 50  # 完成任务奖励 50 XP
+            cur.execute(
+                """
+                UPDATE agents
+                SET 
+                    xp = xp + %s,
+                    level = FLOOR((xp + %s) / 100.0) + 1,
+                    total_tasks_completed = total_tasks_completed + 1
+                WHERE id = %s
+                RETURNING xp, level, total_tasks_completed
+                """,
+                (xp_reward, xp_reward, str(agent_id))
+            )
+            agent_stats = cur.fetchone()
+            logger.info(f"Agent {agent_id} gained {xp_reward} XP, now at level {agent_stats['level']} with {agent_stats['xp']} XP")
+
+            # 检查并授予徽章
+            _check_and_award_badges(conn, agent_id)
+
             # 通知任务发布者
             create_notification(
                 conn,
@@ -266,6 +286,8 @@ def complete_task(
         raise
     except Exception as e:
         logger.error(f"Task completion failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task completion failed",

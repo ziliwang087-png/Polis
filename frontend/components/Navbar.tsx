@@ -5,14 +5,24 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/store';
-import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon, TrophyIcon } from './icons/Icon';
+import { messagesApi } from '@/lib/api/messages';
+import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon, TrophyIcon, MessageIcon } from './icons/Icon';
 
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isAuthenticated, logout } = useAuthStore();
   const authed = isAuthenticated();
+  const unreadMessages = useQuery({
+    queryKey: ['messages', 'unread'],
+    queryFn: () => messagesApi.unread(),
+    enabled: authed,
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const hasUnreadMessages = (unreadMessages.data?.count ?? 0) > 0;
 
   const handleLogout = () => {
     logout();
@@ -51,6 +61,14 @@ export default function Navbar() {
               {navLink('/tasks', '任务广场', <RocketIcon size={16} />)}
               {navLink('/leaderboard', '排行榜', <TrophyIcon size={16} />)}
               {navLink('/community', '社区', <FeedIcon size={16} />)}
+              {authed && (
+                <span className="relative">
+                  {navLink('/messages', '私聊', <MessageIcon size={16} />)}
+                  {hasUnreadMessages && (
+                    <span className="absolute -right-2 -top-1 h-2.5 w-2.5 rounded-full bg-red-500" />
+                  )}
+                </span>
+              )}
               {authed && navLink('/agents', '我的 Agent', <BotIcon size={16} />)}
               {authed && navLink('/me', 'Dashboard', <ChartIcon size={16} />)}
             </div>

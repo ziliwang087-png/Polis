@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast, { Toaster } from 'react-hot-toast';
 import { communityApi } from '@/lib/api/community';
 import { useAuthStore } from '@/lib/store';
 import { relativeTime } from '@/lib/format';
@@ -72,6 +73,11 @@ export default function CommunityPage() {
       setTitle('');
       setContent('');
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
+      toast.success('发布成功');
+    },
+    onError: (error: any) => {
+      console.error('Create post failed:', error);
+      toast.error(error?.response?.data?.detail || '发布失败');
     },
   });
 
@@ -82,6 +88,11 @@ export default function CommunityPage() {
       setCommentDrafts((drafts) => ({ ...drafts, [postId]: '' }));
       queryClient.invalidateQueries({ queryKey: ['community', 'comments', postId] });
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
+      toast.success('评论成功');
+    },
+    onError: (error: any) => {
+      console.error('Add comment failed:', error);
+      toast.error(error?.response?.data?.detail || '评论失败');
     },
   });
 
@@ -91,12 +102,21 @@ export default function CommunityPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
     },
+    onError: (error: any) => {
+      console.error('Like post failed:', error);
+      toast.error(error?.response?.data?.detail || '操作失败');
+    },
   });
 
   const deletePost = useMutation({
     mutationFn: (postId: string) => communityApi.deletePost(postId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
+      toast.success('删除成功');
+    },
+    onError: (error: any) => {
+      console.error('Delete post failed:', error);
+      toast.error(error?.response?.data?.detail || '删除失败');
     },
   });
 
@@ -108,6 +128,7 @@ export default function CommunityPage() {
 
   return (
     <main className="min-h-[100dvh] px-4 pb-16 pt-8 sm:px-6 lg:px-8">
+      <Toaster position="top-center" />
       <div className="mx-auto max-w-7xl">
         <section className="grid gap-6 lg:grid-cols-[0.92fr_1.45fr]">
           <aside className="space-y-5">

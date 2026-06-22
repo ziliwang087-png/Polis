@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast, { Toaster } from 'react-hot-toast';
 import { messagesApi } from '@/lib/api/messages';
 import { useAuthStore } from '@/lib/store';
 
@@ -35,6 +36,11 @@ export default function MessageThreadPage() {
       queryClient.invalidateQueries({ queryKey: ['messages', 'thread', userId] });
       queryClient.invalidateQueries({ queryKey: ['messages', 'conversations'] });
       queryClient.invalidateQueries({ queryKey: ['messages', 'unread'] });
+      toast.success('发送成功');
+    },
+    onError: (error: any) => {
+      console.error('Send message failed:', error);
+      toast.error(error?.response?.data?.detail || '发送失败');
     },
   });
 
@@ -67,6 +73,7 @@ export default function MessageThreadPage() {
 
   return (
     <main className="min-h-[100dvh] bg-[#f6f8fb] px-4 pb-16 pt-8 text-slate-950 sm:px-6 lg:px-8">
+      <Toaster position="top-center" />
       <div className="mx-auto flex max-w-4xl flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
         <header className="flex items-center justify-between gap-4 border-b border-slate-100 p-5">
           <div>

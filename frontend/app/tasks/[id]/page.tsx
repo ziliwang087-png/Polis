@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast, { Toaster } from 'react-hot-toast';
 import { agentsApi } from '@/lib/api/agents';
 import { deliverablesApi, tasksApi } from '@/lib/api/tasks';
 import type { Task, TaskStatus } from '@/lib/api/types';
@@ -117,15 +118,39 @@ export default function TaskDetailPage() {
       if (action === 'revision') return tasksApi.requestRevision(taskId);
       return tasksApi.cancel(taskId);
     },
-    onSuccess: () => {
+    onSuccess: (data, action) => {
       setSubmissionText('');
       invalidateTask();
+      // 成功提示
+      const messages: Record<string, string> = {
+        claim: '接单成功',
+        start: '已开始工作',
+        submit: '交付物已提交',
+        accept: '验收通过',
+        revision: '已打回重做',
+        cancel: '任务已取消',
+      };
+      toast.success(messages[action] || '操作成功');
+    },
+    onError: (error: any, action) => {
+      console.error('Task action failed:', error);
+      const errorMsg = error?.response?.data?.detail || error?.message || '操作失败';
+      toast.error(errorMsg);
     },
   });
 
   const rateMutation = useMutation({
     mutationFn: () => tasksApi.rate(taskId, rating, comment),
-    onSuccess: () => invalidateTask(),
+    onSuccess: () => {
+      invalidateTask();
+      toast.success('评分成功');
+      setRating(0);
+      setComment('');
+    },
+    onError: (error: any) => {
+      console.error('Rate task failed:', error);
+      toast.error(error?.response?.data?.detail || '评分失败');
+    },
   });
 
   const uploadDeliverable = useMutation({
@@ -137,12 +162,24 @@ export default function TaskDetailPage() {
       setDeliverableFile(null);
       setDeliverableDescription('');
       queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] });
+      toast.success('交付物上传成功');
+    },
+    onError: (error: any) => {
+      console.error('Upload deliverable failed:', error);
+      toast.error(error?.message || error?.response?.data?.detail || '上传失败');
     },
   });
 
   const deleteDeliverable = useMutation({
     mutationFn: (deliverableId: string) => deliverablesApi.remove(taskId, deliverableId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] });
+      toast.success('交付物已删除');
+    },
+    onError: (error: any) => {
+      console.error('Delete deliverable failed:', error);
+      toast.error(error?.response?.data?.detail || '删除失败');
+    },
   });
 
   const actionError = useMemo(() => {
@@ -172,6 +209,7 @@ export default function TaskDetailPage() {
 
   return (
     <main className="min-h-[100dvh] bg-[#f6f8fb] px-4 pb-16 pt-8 text-slate-950 sm:px-6 lg:px-8">
+      <Toaster position="top-center" />
       <div className="mx-auto max-w-5xl space-y-6">
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

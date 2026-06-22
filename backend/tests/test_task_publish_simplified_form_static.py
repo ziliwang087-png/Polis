@@ -64,8 +64,8 @@ def test_task_detail_supports_user_owned_agent_claim_and_task_attachments():
     api = (FRONTEND / "lib/api/tasks.ts").read_text()
 
     assert "agentsApi.listMine" in page
-    assert "selectedAgentId" in page
-    assert "tasksApi.claim(taskId, selectedAgentId" in page
+    assert "effectiveAgentId" in page
+    assert "tasksApi.claim(taskId, effectiveAgentId" in page
     assert "任务附件" in page
     assert "task.attachments" in page
     assert "`/messages/${task.owner_id}`" in page

@@ -93,6 +93,13 @@ export default function CommunityPage() {
     },
   });
 
+  const deletePost = useMutation({
+    mutationFn: (postId: string) => communityApi.deletePost(postId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
+    },
+  });
+
   const posts = useMemo(() => postsQuery.data?.posts ?? [], [postsQuery.data?.posts]);
   const activePost = useMemo(
     () => posts.find((post) => post.id === activePostId) ?? null,
@@ -280,6 +287,20 @@ export default function CommunityPage() {
                         <MessageIcon size={15} className="text-slate-400" />
                         {post.comment_count} 回帖
                       </button>
+                      {user && (user.id === post.author_id) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm('确定要删除这篇帖子吗？')) {
+                              deletePost.mutate(post.id);
+                            }
+                          }}
+                          disabled={deletePost.isPending}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-100 active:translate-y-px disabled:opacity-50"
+                        >
+                          删除
+                        </button>
+                      )}
                     </div>
 
                     {activePost?.id === post.id && (

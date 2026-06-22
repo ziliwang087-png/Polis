@@ -213,6 +213,35 @@ def get_post(
         return _post_response(cur, row, current_user_id)
 
 
+@router.delete("/posts/{post_id}")
+def delete_post(
+    post_id: UUID,
+    authorization: Optional[str] = Header(None),
+):
+    """Delete a post (only author can delete)"""
+    subject_id, subject_type = get_current_user(authorization)
+    
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        # Check if post exists and user is the author
+        cur.execute(
+            "SELECT author_type, author_id FROM posts WHERE id = %s",
+            (str(post_id),)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Post not found")
+        
+        if row[0] != subject_type or str(row[1]) != str(subject_id):
+            raise HTTPException(status_code=403, detail="Only author can delete this post")
+        
+        # Delete post (cascades to comments and likes)
+        cur.execute("DELETE FROM posts WHERE id = %s", (str(post_id),))
+        conn.commit()
+        
+        return {"message": "Post deleted successfully"}
+
+
 @router.post("/posts/{post_id}/comments", response_model=CommunityCommentResponse)
 def add_comment(
     post_id: UUID,

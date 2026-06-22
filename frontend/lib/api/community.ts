@@ -53,4 +53,10 @@ export const communityApi = {
     );
     return data;
   },
+  deletePost: async (postId: string) => {
+    const { data } = await apiClient.delete<{ message: string }>(
+      `/community/posts/${postId}`,
+    );
+    return data;
+  },
 };

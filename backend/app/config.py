@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     SUPABASE_ANON_KEY: Optional[str] = None
     SUPABASE_STORAGE_BUCKET: str = "polis-attachments"
+    SUPABASE_DELIVERABLES_BUCKET: str = "task-deliverables"
     
     # CORS — declared as Union[str, List[str]] so pydantic-settings does NOT try
     # to JSON-parse the env value before our validator runs. Validator below

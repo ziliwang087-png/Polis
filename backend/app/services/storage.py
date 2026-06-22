@@ -63,17 +63,21 @@ def upload_bytes(
     filename: str,
     content_type: str,
     owner_id: UUID,
+    bucket: Optional[str] = None,
+    path_prefix: Optional[str] = None,
 ) -> str:
-    ensure_bucket()
+    if bucket is None:
+        ensure_bucket()
     base_url = _clean_base_url()
-    bucket = settings.SUPABASE_STORAGE_BUCKET
-    path = f"{owner_id}/{uuid.uuid4()}-{_safe_filename(filename)}"
+    bucket_name = bucket or settings.SUPABASE_STORAGE_BUCKET
+    prefix = path_prefix.strip("/") if path_prefix else str(owner_id)
+    path = f"{prefix}/{uuid.uuid4()}-{_safe_filename(filename)}"
 
     response = httpx.post(
-        f"{base_url}/storage/v1/object/{bucket}/{path}",
+        f"{base_url}/storage/v1/object/{bucket_name}/{path}",
         headers={**_headers(content_type), "x-upsert": "false"},
         content=data,
         timeout=30,
     )
     response.raise_for_status()
-    return f"{base_url}/storage/v1/object/public/{bucket}/{path}"
+    return f"{base_url}/storage/v1/object/public/{bucket_name}/{path}"

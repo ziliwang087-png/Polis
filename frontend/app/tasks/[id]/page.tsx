@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { tasksApi } from '@/lib/api/tasks';
+import { deliverablesApi, tasksApi } from '@/lib/api/tasks';
 import type { Task, TaskStatus } from '@/lib/api/types';
+import { useAuthStore } from '@/lib/store';
 
 const STATUS_STEPS: Array<{ status: TaskStatus; label: string }> = [
   { status: 'open', label: '已发布' },
@@ -58,11 +59,15 @@ export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { isAuthenticated } = useAuthStore();
+  const authed = isAuthenticated();
   const taskId = params.id as string;
 
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [submissionText, setSubmissionText] = useState('');
+  const [deliverableFile, setDeliverableFile] = useState<File | null>(null);
+  const [deliverableDescription, setDeliverableDescription] = useState('');
 
   const taskQuery = useQuery({
     queryKey: ['tasks', taskId],
@@ -76,6 +81,14 @@ export default function TaskDetailPage() {
   const currentStep = task ? stepIndex(task.status) : -1;
 
   const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
+
+  const deliverablesQuery = useQuery({
+    queryKey: ['tasks', taskId, 'deliverables'],
+    queryFn: () => deliverablesApi.list(taskId),
+    enabled: Boolean(taskId) && authed,
+    staleTime: 30_000,
+    retry: 1,
+  });
 
   const actionMutation = useMutation({
     mutationFn: async (action: 'claim' | 'start' | 'submit' | 'accept' | 'revision' | 'cancel') => {
@@ -97,6 +110,23 @@ export default function TaskDetailPage() {
   const rateMutation = useMutation({
     mutationFn: () => tasksApi.rate(taskId, rating, comment),
     onSuccess: () => invalidateTask(),
+  });
+
+  const uploadDeliverable = useMutation({
+    mutationFn: () => {
+      if (!deliverableFile) throw new Error('请选择文件');
+      return deliverablesApi.upload(taskId, deliverableFile, deliverableDescription);
+    },
+    onSuccess: () => {
+      setDeliverableFile(null);
+      setDeliverableDescription('');
+      queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] });
+    },
+  });
+
+  const deleteDeliverable = useMutation({
+    mutationFn: (deliverableId: string) => deliverablesApi.remove(taskId, deliverableId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] }),
   });
 
   const actionError = useMemo(() => {
@@ -267,6 +297,85 @@ export default function TaskDetailPage() {
           )}
         </section>
 
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">交付物</h2>
+              <p className="mt-1 text-sm text-slate-500">支持多个文件，最大 50MB。</p>
+            </div>
+          </div>
+
+          {(task.status === 'in_progress' || task.status === 'submitted') && (
+            <div className="mb-5 grid gap-3 rounded-lg bg-slate-50 p-4">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-slate-700">上传文件</span>
+                <input
+                  type="file"
+                  onChange={(event) => setDeliverableFile(event.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-slate-700">描述</span>
+                <input
+                  value={deliverableDescription}
+                  onChange={(event) => setDeliverableDescription(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[#1d4ed8]"
+                  placeholder="比如：最终代码包、设计稿或说明文档"
+                />
+              </label>
+              {uploadDeliverable.isError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">上传失败，请确认权限和文件大小。</div>
+              )}
+              <ActionButton pending={uploadDeliverable.isPending} disabled={!deliverableFile} onClick={() => uploadDeliverable.mutate()}>
+                上传交付物
+              </ActionButton>
+            </div>
+          )}
+
+          {deliverablesQuery.isLoading ? (
+            <div className="rounded-lg bg-slate-50 p-5 text-sm text-slate-500">交付物加载中...</div>
+          ) : deliverablesQuery.isError ? (
+            <div className="rounded-lg bg-red-50 p-5 text-sm text-red-600">交付物列表加载失败</div>
+          ) : (deliverablesQuery.data ?? []).length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+              暂无交付物
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(deliverablesQuery.data ?? []).map((item) => (
+                <div key={item.id} className="flex flex-col gap-3 rounded-lg border border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-950">{item.file_name}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {formatFileSize(item.file_size)} · {formatDateTime(item.created_at)}
+                    </div>
+                    {item.description && <p className="mt-2 text-sm text-slate-600">{item.description}</p>}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <a
+                      href={item.file_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg bg-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1e40af]"
+                    >
+                      下载
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => deleteDeliverable.mutate(item.id)}
+                      disabled={deleteDeliverable.isPending}
+                      className="rounded-lg bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
         {task.status === 'completed' && (
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="mb-4 text-lg font-semibold text-slate-950">给任务评分</h2>
@@ -330,6 +439,13 @@ function ActionButton({
       {pending ? '处理中...' : children}
     </button>
   );
+}
+
+function formatFileSize(bytes: number) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function GhostButton({

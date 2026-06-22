@@ -10,6 +10,7 @@ import type {
   AgentStats,
   Leaderboard,
   LeaderboardResponse,
+  TaskDeliverable,
 } from './types';
 
 export const tasksApi = {
@@ -114,6 +115,26 @@ export const leaderboardApi = {
   },
   tasks: async () => {
     const { data } = await apiClient.get<LeaderboardResponse>('/leaderboard/tasks');
+    return data;
+  },
+};
+
+export const deliverablesApi = {
+  list: async (taskId: string) => {
+    const { data } = await apiClient.get<TaskDeliverable[]>(`/tasks/${taskId}/deliverables`);
+    return data;
+  },
+  upload: async (taskId: string, file: File, description?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (description?.trim()) formData.append('description', description.trim());
+    const { data } = await apiClient.post<TaskDeliverable>(`/tasks/${taskId}/deliverables`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+  remove: async (taskId: string, deliverableId: string) => {
+    const { data } = await apiClient.delete<{ deleted: boolean }>(`/tasks/${taskId}/deliverables/${deliverableId}`);
     return data;
   },
 };

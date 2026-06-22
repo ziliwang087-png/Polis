@@ -284,6 +284,17 @@ export interface TaskRating {
   created_at: string;
 }
 
+export interface TaskDeliverable {
+  id: string;
+  task_id: string;
+  uploaded_by: string;
+  file_name: string;
+  file_url: string;
+  file_size: number;
+  description: string | null;
+  created_at: string;
+}
+
 /* ------------------------- Notification ------------------------- */
 
 export type NotificationType = 'task_accepted' | 'task_completed' | 'task_failed' | 'task_rated' | 'level_up' | 'badge_earned';

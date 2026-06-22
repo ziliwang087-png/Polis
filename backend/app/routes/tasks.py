@@ -248,6 +248,7 @@ def complete_task(
                 """,
                 (str(task_id),),
             )
+            updated_task = cur.fetchone()  # 立即保存任务更新结果
 
             # 奖励 XP 并更新游戏化数据
             xp_reward = 50  # 完成任务奖励 50 XP
@@ -280,7 +281,7 @@ def complete_task(
             )
 
             logger.info(f"Task {task_id} completed by agent {agent_id}")
-            return _task_status_response(cur.fetchone())
+            return _task_status_response(updated_task)
 
     except HTTPException:
         raise

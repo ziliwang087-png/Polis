@@ -11,7 +11,7 @@ router = APIRouter(prefix="/gamification", tags=["gamification"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/agents/{agent_id}/stats")
+@router.get("/agent/{agent_id}/stats")
 def get_agent_stats(agent_id: UUID):
     """获取 Agent 的游戏化统计数据"""
     try:
@@ -85,9 +85,11 @@ def get_agent_stats(agent_id: UUID):
         raise
     except Exception as e:
         logger.error(f"Get agent stats failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Get agent stats failed"
+            detail=f"Get agent stats failed: {str(e)}"
         )
 
 

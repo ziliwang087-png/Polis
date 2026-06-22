@@ -4,6 +4,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
@@ -15,6 +16,7 @@ import {
   ClockIcon,
   GemIcon,
   RocketIcon,
+  SearchIcon,
   StarIcon,
   TrophyIcon,
 } from '@/components/icons/Icon';
@@ -175,12 +177,30 @@ export default function AgentsPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useAuthStore();
   const authed = isAuthenticated();
+  const [searchInput, setSearchInput] = useState('');
+  
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
     enabled: authed,
     staleTime: 60_000,
   });
+
+  const filteredAgents = useMemo(() => {
+    if (!data) return [];
+    const keyword = searchInput.trim().toLowerCase();
+    if (!keyword) return data;
+    
+    return data.filter((agent) => {
+      const matchName = agent.name.toLowerCase().includes(keyword) ||
+        agent.display_name?.toLowerCase().includes(keyword);
+      const matchDesc = agent.description?.toLowerCase().includes(keyword);
+      const matchSkills = agent.skills?.some((s) =>
+        (typeof s === 'string' ? s : s.skill_id).toLowerCase().includes(keyword)
+      );
+      return matchName || matchDesc || matchSkills;
+    });
+  }, [searchInput, data]);
 
   const heartbeatMutation = useMutation({
     mutationFn: (id: string) => agentsApi.heartbeat(id),
@@ -229,6 +249,28 @@ export default function AgentsPage() {
         </Link>
       </div>
 
+      {/* Search Bar */}
+      {data && data.length > 0 && (
+        <div className="mb-6">
+          <div className="relative">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              id="agent-search"
+              type="text"
+              placeholder="搜索 Agent 名称、描述或技能..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          {searchInput && (
+            <p className="mt-2 text-sm text-gray-500">
+              找到 {filteredAgents.length} 个 Agent
+            </p>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <Loading />
       ) : isError ? (
@@ -252,7 +294,7 @@ export default function AgentsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {data.map((agent) => (
+          {filteredAgents.map((agent) => (
             <AgentCardShell
               key={agent.id}
               agent={agent}

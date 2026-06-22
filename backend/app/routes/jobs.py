@@ -174,21 +174,30 @@ def _a2a_task(row, artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _job_response(cur, row) -> JobResponse:
-    cur.execute(
-        "SELECT * FROM job_artifacts WHERE job_id = %s ORDER BY created_at ASC",
-        (str(row["id"]),),
-    )
-    artifacts = [dict(artifact) for artifact in cur.fetchall()]
+def _job_response(cur, row, artifacts=None, rating_row=None, events=None) -> JobResponse:
+    """
+    构建单个 JobResponse。
+    支持传入预加载的 artifacts/rating/events 以避免 N+1 查询。
+    """
+    if artifacts is None:
+        cur.execute(
+            "SELECT * FROM job_artifacts WHERE job_id = %s ORDER BY created_at ASC",
+            (str(row["id"]),),
+        )
+        artifacts = [dict(artifact) for artifact in cur.fetchall()]
 
-    cur.execute("SELECT * FROM job_ratings WHERE job_id = %s", (str(row["id"]),))
-    rating_row = cur.fetchone()
+    if rating_row is None:
+        cur.execute("SELECT * FROM job_ratings WHERE job_id = %s", (str(row["id"]),))
+        rating_row = cur.fetchone()
 
-    cur.execute(
-        "SELECT * FROM job_events WHERE job_id = %s ORDER BY created_at ASC",
-        (str(row["id"]),),
-    )
-    events = [JobEventResponse(**dict(event)) for event in cur.fetchall()]
+    if events is None:
+        cur.execute(
+            "SELECT * FROM job_events WHERE job_id = %s ORDER BY created_at ASC",
+            (str(row["id"]),),
+        )
+        events = [JobEventResponse(**dict(event)) for event in cur.fetchall()]
+    else:
+        events = [JobEventResponse(**dict(event)) for event in events]
 
     return JobResponse(
         id=row["id"],
@@ -210,6 +219,68 @@ def _job_response(cur, row) -> JobResponse:
         events=events,
         a2a_task=_a2a_task(row, artifacts),
     )
+
+
+def _batch_job_responses(cur, job_rows) -> List[JobResponse]:
+    """
+    批量构建 JobResponse，消除 N+1 查询。
+    一次性查询所有 job 的 artifacts/ratings/events。
+    """
+    if not job_rows:
+        return []
+    
+    job_ids = [str(row["id"]) for row in job_rows]
+    
+    # 批量查询 artifacts
+    cur.execute(
+        """
+        SELECT * FROM job_artifacts
+        WHERE job_id = ANY(%s::uuid[])
+        ORDER BY job_id, created_at ASC
+        """,
+        (job_ids,),
+    )
+    artifacts_by_job = {}
+    for artifact in cur.fetchall():
+        job_id = artifact["job_id"]
+        if job_id not in artifacts_by_job:
+            artifacts_by_job[job_id] = []
+        artifacts_by_job[job_id].append(dict(artifact))
+    
+    # 批量查询 ratings
+    cur.execute(
+        "SELECT * FROM job_ratings WHERE job_id = ANY(%s::uuid[])",
+        (job_ids,),
+    )
+    ratings_by_job = {row["job_id"]: row for row in cur.fetchall()}
+    
+    # 批量查询 events
+    cur.execute(
+        """
+        SELECT * FROM job_events
+        WHERE job_id = ANY(%s::uuid[])
+        ORDER BY job_id, created_at ASC
+        """,
+        (job_ids,),
+    )
+    events_by_job = {}
+    for event in cur.fetchall():
+        job_id = event["job_id"]
+        if job_id not in events_by_job:
+            events_by_job[job_id] = []
+        events_by_job[job_id].append(event)
+    
+    # 构建所有 JobResponse
+    return [
+        _job_response(
+            cur,
+            row,
+            artifacts=artifacts_by_job.get(row["id"], []),
+            rating_row=ratings_by_job.get(row["id"]),
+            events=events_by_job.get(row["id"], []),
+        )
+        for row in job_rows
+    ]
 
 
 def _agent_for_token(cur, authorization: Optional[str], request_agent_id: Optional[UUID]) -> Dict[str, Any]:
@@ -395,9 +466,10 @@ def list_jobs(
                     return []
                 query += " AND to_agent_id = ANY(%s::uuid[])"
                 params.append(agent_ids)
-        query += " ORDER BY created_at DESC"
+        query += " ORDER BY created_at DESC LIMIT 20"
         cur.execute(query, params)
-        return [_job_response(cur, row) for row in cur.fetchall()]
+        job_rows = cur.fetchall()
+        return _batch_job_responses(cur, job_rows)
 
 
 @router.get("/{job_id}", response_model=JobResponse)

@@ -2,7 +2,7 @@
 Community discussion routes.
 """
 import logging
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -52,7 +52,14 @@ def _liked_by(cur, post_id: UUID, user_id: Optional[UUID]) -> bool:
     return cur.fetchone() is not None
 
 
-def _post_response(cur, row, current_user_id: Optional[UUID] = None) -> CommunityPostResponse:
+def _post_response(cur, row, current_user_id: Optional[UUID] = None, liked_by_me: Optional[bool] = None) -> CommunityPostResponse:
+    """
+    构建单个 CommunityPostResponse。
+    支持传入预加载的 liked_by_me 以避免 N+1 查询。
+    """
+    if liked_by_me is None:
+        liked_by_me = _liked_by(cur, row["id"], current_user_id)
+    
     return CommunityPostResponse(
         id=row["id"],
         title=row["title"],
@@ -63,10 +70,41 @@ def _post_response(cur, row, current_user_id: Optional[UUID] = None) -> Communit
         category=row["category"],
         likes=row.get("likes") or 0,
         comment_count=row.get("comment_count") or 0,
-        liked_by_me=_liked_by(cur, row["id"], current_user_id),
+        liked_by_me=liked_by_me,
         created_at=row["created_at"],
         updated_at=row.get("updated_at"),
     )
+
+
+def _batch_post_responses(cur, post_rows, current_user_id: Optional[UUID] = None) -> List[CommunityPostResponse]:
+    """
+    批量构建 CommunityPostResponse，消除 N+1 查询。
+    一次性查询所有 post 的 liked_by_me 状态。
+    """
+    if not post_rows:
+        return []
+    
+    # 批量查询 liked_by_me
+    likes_by_post = {}
+    if current_user_id:
+        post_ids = [str(row["id"]) for row in post_rows]
+        cur.execute(
+            "SELECT post_id FROM post_likes WHERE post_id = ANY(%s::uuid[]) AND user_id = %s",
+            (post_ids, str(current_user_id)),
+        )
+        liked_post_ids = {row["post_id"] for row in cur.fetchall()}
+        likes_by_post = {post_id: (post_id in liked_post_ids) for post_id in post_ids}
+    
+    # 构建所有 CommunityPostResponse
+    return [
+        _post_response(
+            cur,
+            row,
+            current_user_id=current_user_id,
+            liked_by_me=likes_by_post.get(row["id"], False),
+        )
+        for row in post_rows
+    ]
 
 
 def _optional_user_id(authorization: Optional[str]) -> Optional[UUID]:
@@ -146,7 +184,7 @@ def list_posts(
         total_row = cur.fetchone() or {"count": len(rows)}
 
         return CommunityPostListResponse(
-            posts=[_post_response(cur, row, current_user_id) for row in rows],
+            posts=_batch_post_responses(cur, rows, current_user_id),
             total=total_row["count"],
         )
 

@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 def list_notifications(
     read: Optional[bool] = Query(None),
     limit: int = Query(20, le=100),
-    user_id: UUID = Depends(get_current_user)
+    current_user: tuple = Depends(get_current_user)
 ):
     """查询当前用户的通知"""
+    user_id, user_type = current_user
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -55,9 +56,10 @@ def list_notifications(
 @router.post("/{notification_id}/read")
 def mark_notification_read(
     notification_id: UUID,
-    user_id: UUID = Depends(get_current_user)
+    current_user: tuple = Depends(get_current_user)
 ):
     """标记通知为已读"""
+    user_id, user_type = current_user
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -75,7 +77,7 @@ def mark_notification_read(
                     detail="Notification not found"
                 )
 
-            if notification['user_id'] != user_id:
+            if str(notification['user_id']) != str(user_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Not your notification"
@@ -100,8 +102,9 @@ def mark_notification_read(
 
 
 @router.post("/read-all")
-def mark_all_notifications_read(user_id: UUID = Depends(get_current_user)):
+def mark_all_notifications_read(current_user: tuple = Depends(get_current_user)):
     """标记所有通知为已读"""
+    user_id, user_type = current_user
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -122,8 +125,9 @@ def mark_all_notifications_read(user_id: UUID = Depends(get_current_user)):
 
 
 @router.get("/unread-count")
-def get_unread_count(user_id: UUID = Depends(get_current_user)):
+def get_unread_count(current_user: tuple = Depends(get_current_user)):
     """获取未读通知数量"""
+    user_id, user_type = current_user
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()

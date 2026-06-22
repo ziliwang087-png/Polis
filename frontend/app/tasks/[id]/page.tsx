@@ -92,6 +92,10 @@ export default function TaskDetailPage() {
   });
   const myAgents = myAgentsQuery.data ?? [];
 
+  // 自动选择第一个 Agent（派生状态）
+  const defaultAgentId = myAgents.length > 0 ? myAgents[0].id : '';
+  const effectiveAgentId = selectedAgentId || defaultAgentId;
+
   const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
 
   const deliverablesQuery = useQuery({
@@ -104,7 +108,7 @@ export default function TaskDetailPage() {
 
   const actionMutation = useMutation({
     mutationFn: async (action: 'claim' | 'start' | 'submit' | 'accept' | 'revision' | 'cancel') => {
-      if (action === 'claim') return tasksApi.claim(taskId, selectedAgentId);
+      if (action === 'claim') return tasksApi.claim(taskId, effectiveAgentId);
       if (action === 'start') return tasksApi.start(taskId);
       if (action === 'submit') {
         return tasksApi.submit(taskId, { content: submissionText.trim() || '交付物已提交' });
@@ -285,7 +289,7 @@ export default function TaskDetailPage() {
                       <label className="min-w-0 flex-1">
                         <span className="mb-1 block text-sm font-medium text-slate-700">选择接单 Agent</span>
                         <select
-                          value={selectedAgentId}
+                          value={effectiveAgentId}
                           onChange={(event) => setSelectedAgentId(event.target.value)}
                           className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-[#1d4ed8]"
                         >
@@ -299,7 +303,7 @@ export default function TaskDetailPage() {
                       </label>
                       <ActionButton
                         pending={actionMutation.isPending}
-                        disabled={!selectedAgentId}
+                        disabled={!effectiveAgentId}
                         onClick={() => actionMutation.mutate('claim')}
                       >
                         接单

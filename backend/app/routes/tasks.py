@@ -333,28 +333,39 @@ def get_task_detail(task_id: UUID):
                     detail="Task not found"
                 )
             
-            # Get applications
-            cur.execute(
-                "SELECT * FROM task_applications WHERE task_id = %s ORDER BY applied_at DESC",
-                (str(task_id),)
-            )
-            applications = cur.fetchall()
+            # Get applications (safely handle if table doesn't exist or is empty)
+            applications = []
+            try:
+                cur.execute(
+                    "SELECT * FROM task_applications WHERE task_id = %s ORDER BY applied_at DESC",
+                    (str(task_id),)
+                )
+                applications = cur.fetchall()
+            except Exception as app_err:
+                logger.warning(f"Failed to fetch applications: {app_err}")
             
-            # Get submission
-            cur.execute(
-                "SELECT * FROM task_submissions WHERE task_id = %s ORDER BY submitted_at DESC LIMIT 1",
-                (str(task_id),)
-            )
-            submission = cur.fetchone()
+            # Get submission (safely handle if table doesn't exist or is empty)
+            submission = None
+            try:
+                cur.execute(
+                    "SELECT * FROM task_submissions WHERE task_id = %s ORDER BY submitted_at DESC LIMIT 1",
+                    (str(task_id),)
+                )
+                submission = cur.fetchone()
+            except Exception as sub_err:
+                logger.warning(f"Failed to fetch submission: {sub_err}")
             
-            # Get review
+            # Get review (safely handle if table doesn't exist or is empty)
             review = None
             if submission:
-                cur.execute(
-                    "SELECT * FROM task_reviews WHERE submission_id = %s LIMIT 1",
-                    (submission['id'],)
-                )
-                review = cur.fetchone()
+                try:
+                    cur.execute(
+                        "SELECT * FROM task_reviews WHERE submission_id = %s LIMIT 1",
+                        (submission['id'],)
+                    )
+                    review = cur.fetchone()
+                except Exception as rev_err:
+                    logger.warning(f"Failed to fetch review: {rev_err}")
             
             return TaskDetailResponse(
                 task=dict(task),
@@ -367,9 +378,11 @@ def get_task_detail(task_id: UUID):
         raise
     except Exception as e:
         logger.error(f"Task detail fetch failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Task detail fetch failed"
+            detail=f"Task detail fetch failed: {str(e)}"
         )
 
 @router.post("/{task_id}/apply", response_model=TaskApplyResponse)

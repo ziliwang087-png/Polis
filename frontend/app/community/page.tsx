@@ -75,9 +75,10 @@ export default function CommunityPage() {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
       toast.success('发布成功');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Create post failed:', error);
-      toast.error(error?.response?.data?.detail || '发布失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '发布失败');
     },
   });
 
@@ -90,9 +91,10 @@ export default function CommunityPage() {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
       toast.success('评论成功');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Add comment failed:', error);
-      toast.error(error?.response?.data?.detail || '评论失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '评论失败');
     },
   });
 
@@ -102,9 +104,10 @@ export default function CommunityPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Like post failed:', error);
-      toast.error(error?.response?.data?.detail || '操作失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '操作失败');
     },
   });
 
@@ -114,9 +117,10 @@ export default function CommunityPage() {
       queryClient.invalidateQueries({ queryKey: ['community', 'posts'] });
       toast.success('删除成功');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Delete post failed:', error);
-      toast.error(error?.response?.data?.detail || '删除失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '删除失败');
     },
   });
 

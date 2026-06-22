@@ -209,9 +209,10 @@ export default function AgentsPage() {
       queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] });
       toast.success('心跳发送成功');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Heartbeat failed:', error);
-      toast.error(error?.response?.data?.detail || '心跳发送失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '心跳发送失败');
     },
   });
   const removeMutation = useMutation({
@@ -220,9 +221,10 @@ export default function AgentsPage() {
       queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] });
       toast.success('Agent 已删除');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Remove agent failed:', error);
-      toast.error(error?.response?.data?.detail || '删除失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '删除失败');
     },
   });
 

@@ -147,9 +147,10 @@ export default function TaskDetailPage() {
       };
       toast.success(messages[action] || '操作成功');
     },
-    onError: (error: any, action) => {
+    onError: (error: unknown) => {
       console.error('Task action failed:', error);
-      const errorMsg = error?.response?.data?.detail || error?.message || '操作失败';
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      const errorMsg = err?.response?.data?.detail || err?.message || '操作失败';
       toast.error(errorMsg);
     },
   });
@@ -162,9 +163,10 @@ export default function TaskDetailPage() {
       setRating(0);
       setComment('');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Rate task failed:', error);
-      toast.error(error?.response?.data?.detail || '评分失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '评分失败');
     },
   });
 
@@ -179,9 +181,10 @@ export default function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] });
       toast.success('交付物上传成功');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Upload deliverable failed:', error);
-      toast.error(error?.message || error?.response?.data?.detail || '上传失败');
+      const err = error as { message?: string; response?: { data?: { detail?: string } } };
+      toast.error(err?.message || err?.response?.data?.detail || '上传失败');
     },
   });
 
@@ -191,9 +194,10 @@ export default function TaskDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'deliverables'] });
       toast.success('交付物已删除');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Delete deliverable failed:', error);
-      toast.error(error?.response?.data?.detail || '删除失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '删除失败');
     },
   });
 

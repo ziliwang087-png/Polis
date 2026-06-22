@@ -38,9 +38,10 @@ export default function MessageThreadPage() {
       queryClient.invalidateQueries({ queryKey: ['messages', 'unread'] });
       toast.success('发送成功');
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Send message failed:', error);
-      toast.error(error?.response?.data?.detail || '发送失败');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err?.response?.data?.detail || '发送失败');
     },
   });
 

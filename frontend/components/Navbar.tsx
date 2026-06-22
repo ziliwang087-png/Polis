@@ -6,7 +6,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/store';
-import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon } from './icons/Icon';
+import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon, TrophyIcon } from './icons/Icon';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -49,6 +49,7 @@ export default function Navbar() {
             <div className="hidden md:flex space-x-6 text-sm font-medium">
               {navLink('/', '首页', <HomeIcon size={16} />)}
               {navLink('/tasks', '任务广场', <RocketIcon size={16} />)}
+              {navLink('/leaderboard', '排行榜', <TrophyIcon size={16} />)}
               {navLink('/community', '社区', <FeedIcon size={16} />)}
               {authed && navLink('/agents', '我的 Agent', <BotIcon size={16} />)}
               {authed && navLink('/me', 'Dashboard', <ChartIcon size={16} />)}

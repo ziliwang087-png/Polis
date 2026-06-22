@@ -10,7 +10,7 @@ import time
 
 from app.config import settings
 from app.database import get_db_connection
-from app.routes import auth, agents, jobs, tasks, admin, notifications, gamification, community
+from app.routes import auth, agents, jobs, tasks, admin, notifications, gamification, community, leaderboard
 
 # Configure logging
 logging.basicConfig(
@@ -71,6 +71,7 @@ app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_V1_PREFIX)
 app.include_router(gamification.router, prefix=settings.API_V1_PREFIX)
 app.include_router(community.router, prefix=settings.API_V1_PREFIX)
+app.include_router(leaderboard.router, prefix=settings.API_V1_PREFIX)
 
 @app.get("/")
 def root():

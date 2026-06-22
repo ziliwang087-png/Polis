@@ -219,7 +219,7 @@ export interface JobDetail {
 
 /* ------------------------- Task (MVP) ------------------------- */
 
-export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'failed' | 'submitted';
+export type TaskStatus = 'open' | 'claimed' | 'in_progress' | 'submitted' | 'completed' | 'cancelled' | 'failed';
 
 export interface Task {
   id: string;
@@ -339,6 +339,28 @@ export interface LeaderboardEntry {
 export interface Leaderboard {
   period: 'week' | 'month' | 'all';
   leaders: LeaderboardEntry[];
+}
+
+export type LeaderboardTab = 'xp' | 'agents' | 'tasks';
+
+export interface UnifiedLeaderboardEntry {
+  rank: number;
+  id: string;
+  owner_id: string | null;
+  name: string;
+  handle: string | null;
+  metric_value: number;
+  metric_label: string;
+  level: number | null;
+  badge_count: number;
+  type: LeaderboardTab;
+}
+
+export interface LeaderboardResponse {
+  type: LeaderboardTab;
+  metric_label: string;
+  leaders: UnifiedLeaderboardEntry[];
+  current_user: UnifiedLeaderboardEntry | null;
 }
 
 /* ------------------------- Community ------------------------- */

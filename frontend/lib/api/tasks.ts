@@ -2,7 +2,15 @@
  * Task MVP API —— 发布 / 查询 / 接单 / 完成 / 失败 / 评分
  */
 import { apiClient } from './client';
-import type { Task, TaskCreatePayload, TaskCreateResponse, Notification, AgentStats, Leaderboard } from './types';
+import type {
+  Task,
+  TaskCreatePayload,
+  TaskCreateResponse,
+  Notification,
+  AgentStats,
+  Leaderboard,
+  LeaderboardResponse,
+} from './types';
 
 export const tasksApi = {
   list: async (params: { status?: Task['status']; category?: string } = {}) => {
@@ -75,3 +83,17 @@ export const gamificationApi = {
   },
 };
 
+export const leaderboardApi = {
+  xp: async () => {
+    const { data } = await apiClient.get<LeaderboardResponse>('/leaderboard/xp');
+    return data;
+  },
+  agents: async () => {
+    const { data } = await apiClient.get<LeaderboardResponse>('/leaderboard/agents');
+    return data;
+  },
+  tasks: async () => {
+    const { data } = await apiClient.get<LeaderboardResponse>('/leaderboard/tasks');
+    return data;
+  },
+};

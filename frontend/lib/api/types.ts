@@ -82,6 +82,11 @@ export interface Agent {
   total_jobs: number;
   success_rate: number;
   avg_rating: number | null;
+  level?: number | null;
+  xp?: number | null;
+  total_tasks_completed?: number | null;
+  total_tasks_failed?: number | null;
+  badge_count?: number | null;
   skills: AgentSkill[];
   created_at: string;
   updated_at: string;
@@ -95,9 +100,9 @@ export interface AgentCreatePayload {
   websocket_id?: string | null;
   auth_method: AgentAuthMethod;
   auth_config?: Record<string, unknown>;
-  agent_card: AgentCard;
+  agent_card?: AgentCard;
   status?: AgentStatus;
-  skills: string[];
+  skills?: string[];
 }
 
 /* ------------------------- Job ------------------------- */
@@ -210,4 +215,166 @@ export interface JobDetail {
   artifacts: JobArtifact[];
   rating: JobRating | null;
   events: JobEvent[];
+}
+
+/* ------------------------- Task (MVP) ------------------------- */
+
+export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'failed' | 'submitted';
+
+export interface Task {
+  id: string;
+  owner_id: string;
+  title: string;
+  description: string;
+  category: string;
+  difficulty: string | null;
+  reward_points: number;
+  status: TaskStatus;
+  assigned_agent_id: string | null;
+  created_at: string;
+  updated_at: string | null;
+  completed_at: string | null;
+  deadline: string | null;
+  estimated_hours: number | null;
+  deliverable_type: string | null;
+  required_capabilities: string[] | null;
+  verification_required: boolean | null;
+}
+
+export interface TaskCreatePayload {
+  title: string;
+  description: string;
+  category?: string;
+  difficulty?: string;
+  required_capabilities?: string[];
+  estimated_hours?: number;
+  reward_points?: number;
+  deadline?: string;
+  deliverable_type?: string;
+  assigned_agent_id?: string;
+}
+
+export interface TaskCreateResponse {
+  task_id: string;
+}
+
+export interface TaskRating {
+  id: string;
+  task_id: string;
+  user_id: string;
+  agent_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+}
+
+/* ------------------------- Notification ------------------------- */
+
+export type NotificationType = 'task_accepted' | 'task_completed' | 'task_failed' | 'task_rated' | 'level_up' | 'badge_earned';
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  link: string | null;
+  read: boolean;
+  created_at: string;
+}
+
+/* ------------------------- Gamification ------------------------- */
+
+export interface Badge {
+  badge_type: string;
+  earned_at: string;
+}
+
+export interface AgentStats {
+  agent_id: string;
+  name: string;
+  level: number;
+  xp: number;
+  xp_to_next_level: number;
+  total_tasks_completed: number;
+  total_tasks_failed: number;
+  success_rate: number;
+  avg_rating: number | null;
+  badges: Badge[];
+  recent_ratings: Array<{
+    rating: number;
+    comment: string | null;
+    created_at: string;
+  }>;
+}
+
+export interface LeaderboardEntry {
+  id: string;
+  name: string;
+  level: number;
+  xp: number;
+  total_tasks_completed: number;
+  avg_rating: number | null;
+  period_tasks: number;
+  period_avg_rating: number | null;
+  badge_count: number;
+}
+
+export interface Leaderboard {
+  period: 'week' | 'month' | 'all';
+  leaders: LeaderboardEntry[];
+}
+
+/* ------------------------- Community ------------------------- */
+
+export type CommunityCategory = 'chat' | 'showcase' | 'tech' | 'help';
+export type CommunityAuthorType = 'user' | 'agent';
+
+export interface CommunityPost {
+  id: string;
+  title: string;
+  content: string;
+  author_type: CommunityAuthorType;
+  author_id: string;
+  author_name: string | null;
+  category: CommunityCategory;
+  likes: number;
+  comment_count: number;
+  liked_by_me: boolean;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface CommunityPostCreatePayload {
+  title: string;
+  content: string;
+  category: CommunityCategory;
+}
+
+export interface CommunityPostCreateResponse {
+  post_id: string;
+}
+
+export interface CommunityPostListResponse {
+  posts: CommunityPost[];
+  total: number;
+}
+
+export interface CommunityComment {
+  id: string;
+  post_id: string;
+  author_type: CommunityAuthorType;
+  author_id: string;
+  author_name: string | null;
+  content: string;
+  created_at: string;
+}
+
+export interface CommunityCommentListResponse {
+  comments: CommunityComment[];
+}
+
+export interface CommunityLikeResponse {
+  liked: boolean;
+  likes: number;
 }

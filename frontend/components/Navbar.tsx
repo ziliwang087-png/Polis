@@ -1,12 +1,12 @@
 /**
- * 顶部导航栏 —— v1：任务广场 / 我的 Agent / Dashboard
+ * Top navigation
  */
 'use client';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/store';
-import { HomeIcon, BotIcon, ChartIcon, RocketIcon } from './icons/Icon';
+import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon } from './icons/Icon';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -35,33 +35,32 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="bg-white backdrop-filter backdrop-blur-lg bg-opacity-95 mx-6 mt-6 rounded-2xl sticky top-6 z-50 shadow-sm">
+    <nav className="sticky top-4 z-50 mx-3 mt-4 rounded-2xl bg-white/95 shadow-sm backdrop-blur-lg sm:mx-6 sm:mt-6">
       <div className="max-w-6xl mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
-          {/* 左：Logo + 导航 */}
           <div className="flex items-center space-x-8">
             <Link
               href="/"
               className="text-2xl font-bold tracking-tight"
-              style={{ color: '#5b8def' }}
+              style={{ color: '#1d4ed8' }}
             >
               Polis
             </Link>
             <div className="hidden md:flex space-x-6 text-sm font-medium">
               {navLink('/', '任务广场', <HomeIcon size={16} />)}
+              {navLink('/community', '社区', <FeedIcon size={16} />)}
               {authed && navLink('/agents', '我的 Agent', <BotIcon size={16} />)}
               {authed && navLink('/me', 'Dashboard', <ChartIcon size={16} />)}
             </div>
           </div>
 
-          {/* 右：操作区 */}
           <div className="flex items-center space-x-3">
             {authed ? (
               <>
                 <Link
-                  href="/jobs/new"
+                  href="/tasks/new"
                   className="px-4 py-2 text-sm text-white rounded-xl font-medium transition-all hover:shadow-md flex items-center gap-1.5"
-                  style={{ background: '#5b8def' }}
+                  style={{ background: '#1d4ed8' }}
                 >
                   <RocketIcon size={15} strokeWidth={2} />
                   <span>发任务</span>
@@ -87,7 +86,7 @@ export default function Navbar() {
                 <Link
                   href="/register"
                   className="px-5 py-2.5 text-sm text-white rounded-xl font-medium transition-all hover:shadow-md"
-                  style={{ background: '#5b8def' }}
+                  style={{ background: '#1d4ed8' }}
                 >
                   注册
                 </Link>

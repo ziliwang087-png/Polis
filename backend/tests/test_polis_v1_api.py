@@ -29,10 +29,14 @@ class FakePolisStore:
         self.users: dict[uuid.UUID, dict[str, Any]] = {}
         self.agents: dict[uuid.UUID, dict[str, Any]] = {}
         self.agent_skills: dict[uuid.UUID, dict[str, Any]] = {}
+        self.tasks: dict[uuid.UUID, dict[str, Any]] = {}
         self.jobs: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_artifacts: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_ratings: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_events: dict[uuid.UUID, dict[str, Any]] = {}
+        self.community_posts: dict[uuid.UUID, dict[str, Any]] = {}
+        self.community_comments: dict[uuid.UUID, dict[str, Any]] = {}
+        self.post_likes: set[tuple[uuid.UUID, uuid.UUID]] = set()
         self.queries: list[str] = []
         self.notifications: list[dict[str, Any]] = []
         self.uploads: list[dict[str, Any]] = []
@@ -262,6 +266,261 @@ class FakeCursor:
                 self._rows = []
             return
 
+        # community
+        if compact.startswith("insert into posts") and "title, content, author_type, author_id, category" in compact:
+            title, content, author_id, category = params[:4]
+            author_type = "agent" if "'agent'" in compact else "user"
+            pid = uuid.uuid4()
+            row = {
+                "id": pid,
+                "title": title,
+                "content": content,
+                "author_type": author_type,
+                "author_id": uuid.UUID(str(author_id)),
+                "category": category,
+                "likes": 0,
+                "created_at": self.store.now(),
+                "updated_at": self.store.now(),
+            }
+            self.store.community_posts[pid] = row
+            self._rows = [{"id": pid}]
+            return
+
+        if compact.startswith("select p.id, p.title, p.content") and "from posts p" in compact:
+            rows = list(self.store.community_posts.values())
+            if "where p.category = %s" in compact:
+                rows = [row for row in rows if row["category"] == params[0]]
+            elif "where p.id = %s" in compact:
+                pid = uuid.UUID(str(params[0]))
+                rows = [self.store.community_posts[pid]] if pid in self.store.community_posts else []
+            rows.sort(key=lambda row: row["created_at"], reverse=True)
+            out = []
+            for row in rows:
+                author_name = None
+                if row["author_type"] == "user":
+                    user = self.store.users.get(row["author_id"])
+                    if user:
+                        author_name = user.get("display_name") or user.get("username")
+                else:
+                    agent = self.store.agents.get(row["author_id"])
+                    if agent:
+                        author_name = agent.get("display_name") or agent.get("name")
+                out.append({
+                    **row,
+                    "author_name": author_name,
+                    "comment_count": len([
+                        c for c in self.store.community_comments.values()
+                        if c["post_id"] == row["id"]
+                    ]),
+                })
+            self._rows = out
+            return
+
+        if compact.startswith("select count(*) as count from posts p"):
+            rows = list(self.store.community_posts.values())
+            if "where p.category = %s" in compact:
+                rows = [row for row in rows if row["category"] == params[0]]
+            self._rows = [{"count": len(rows)}]
+            return
+
+        if compact.startswith("select 1 from posts where id = %s"):
+            pid = uuid.UUID(str(params[0]))
+            self._rows = [{"?column?": 1}] if pid in self.store.community_posts else []
+            return
+
+        if compact.startswith("insert into comments"):
+            post_id, author_type, author_id, content = params[:4]
+            cid = uuid.uuid4()
+            row = {
+                "id": cid,
+                "post_id": uuid.UUID(str(post_id)),
+                "author_type": author_type,
+                "author_id": uuid.UUID(str(author_id)),
+                "content": content,
+                "created_at": self.store.now(),
+            }
+            self.store.community_comments[cid] = row
+            self._rows = [row]
+            return
+
+        if compact.startswith("select c.id, c.post_id, c.author_type"):
+            pid = uuid.UUID(str(params[0]))
+            rows = [
+                row for row in self.store.community_comments.values()
+                if row["post_id"] == pid
+            ]
+            rows.sort(key=lambda row: row["created_at"])
+            out = []
+            for row in rows:
+                if row["author_type"] == "user":
+                    author = self.store.users.get(row["author_id"])
+                    name = author.get("display_name") or author.get("username") if author else None
+                else:
+                    author = self.store.agents.get(row["author_id"])
+                    name = author.get("display_name") or author.get("name") if author else None
+                out.append({**row, "author_name": name})
+            self._rows = out
+            return
+
+        if compact.startswith("select coalesce(display_name, username) as name from users where id = %s"):
+            uid = uuid.UUID(str(params[0]))
+            user = self.store.users.get(uid)
+            self._rows = [{"name": user.get("display_name") or user.get("username")}] if user else []
+            return
+
+        if compact.startswith("select coalesce(display_name, name) as name from agents where id = %s"):
+            aid = uuid.UUID(str(params[0]))
+            agent = self.store.agents.get(aid)
+            self._rows = [{"name": agent.get("display_name") or agent.get("name")}] if agent else []
+            return
+
+        if compact.startswith("select 1 from post_likes"):
+            post_id, user_id = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
+            self._rows = [{"?column?": 1}] if (post_id, user_id) in self.store.post_likes else []
+            return
+
+        if compact.startswith("insert into post_likes"):
+            post_id, user_id = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
+            self.store.post_likes.add((post_id, user_id))
+            self._rows = []
+            return
+
+        if compact.startswith("select count(*) as count from post_likes where post_id = %s"):
+            pid = uuid.UUID(str(params[0]))
+            self._rows = [{"count": len([1 for post_id, _ in self.store.post_likes if post_id == pid])}]
+            return
+
+        if compact.startswith("update posts set likes = %s where id = %s"):
+            likes, pid = int(params[0]), uuid.UUID(str(params[1]))
+            self.store.community_posts[pid]["likes"] = likes
+            self._rows = []
+            return
+
+        # tasks
+        if compact.startswith("insert into tasks"):
+            (
+                owner_id, title, description, category, difficulty,
+                required_capabilities, estimated_hours, reward_points,
+                deadline, deliverable_type, assigned_agent_id,
+            ) = params[:11]
+            tid = uuid.uuid4()
+            row = {
+                "id": tid,
+                "owner_id": uuid.UUID(str(owner_id)),
+                "title": title,
+                "description": description,
+                "category": category,
+                "difficulty": difficulty,
+                "required_capabilities": _plain(required_capabilities),
+                "estimated_hours": estimated_hours,
+                "reward_points": reward_points,
+                "status": "open",
+                "assigned_agent_id": uuid.UUID(str(assigned_agent_id)) if assigned_agent_id else None,
+                "deadline": deadline,
+                "created_at": self.store.now(),
+                "updated_at": self.store.now(),
+                "completed_at": None,
+                "deliverable_type": deliverable_type,
+                "verification_required": True,
+            }
+            self.store.tasks[tid] = row
+            self._rows = [{"id": tid}]
+            return
+
+        if compact.startswith("select t.id, t.owner_id") and "from tasks t where 1=1" in compact:
+            rows = list(self.store.tasks.values())
+            idx = 0
+            if "t.status = %s" in compact:
+                rows = [row for row in rows if row["status"] == params[idx]]
+                idx += 1
+            if "t.category = %s" in compact:
+                rows = [row for row in rows if row["category"] == params[idx]]
+            rows.sort(key=lambda row: row["created_at"], reverse=True)
+            self._rows = rows
+            return
+
+        if compact.startswith("select t.id, t.owner_id") and "from tasks t where t.status = 'open'" in compact:
+            agent_id = uuid.UUID(str(params[0]))
+            rows = [
+                row for row in self.store.tasks.values()
+                if row["status"] == "open"
+                and (row["assigned_agent_id"] is None or row["assigned_agent_id"] == agent_id)
+            ]
+            rows.sort(key=lambda row: row["created_at"])
+            self._rows = rows
+            return
+
+        if compact.startswith("select id, status, assigned_agent_id") and "from tasks where id = %s for update" in compact:
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks.get(tid)
+            self._rows = [
+                {
+                    "id": row["id"],
+                    "status": row["status"],
+                    "assigned_agent_id": row["assigned_agent_id"],
+                    "owner_id": row["owner_id"],
+                    "title": row["title"],
+                }
+            ] if row else []
+            return
+
+        if compact.startswith("update tasks set assigned_agent_id = %s, status = 'in_progress'"):
+            agent_id, tid = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
+            row = self.store.tasks[tid]
+            row["assigned_agent_id"] = agent_id
+            row["status"] = "in_progress"
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
+        if compact.startswith("update tasks set status = 'completed'"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks[tid]
+            row["status"] = "completed"
+            row["completed_at"] = self.store.now()
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
+        if compact.startswith("update tasks set status = 'failed'"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks[tid]
+            row["status"] = "failed"
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
+        if "select * from tasks where id = %s" in compact:
+            tid = uuid.UUID(str(params[0]))
+            self._rows = [self.store.tasks[tid]] if tid in self.store.tasks else []
+            return
+
+        if "from task_applications where task_id = %s" in compact:
+            self._rows = []
+            return
+
+        if "from task_submissions where task_id = %s" in compact:
+            self._rows = []
+            return
+
+        # notifications
+        if compact.startswith("insert into notifications"):
+            user_id, notification_type, title, message, link = params[:5]
+            nid = uuid.uuid4()
+            row = {
+                "id": nid,
+                "user_id": uuid.UUID(str(user_id)),
+                "type": notification_type,
+                "title": title,
+                "message": message,
+                "link": link,
+                "read": False,
+                "created_at": self.store.now(),
+            }
+            self.store.notifications.append(row)
+            self._rows = [{"id": nid}]
+            return
+
         # jobs
         if compact.startswith("insert into jobs"):
             from_user_id, title, description, required_skill, input_messages, attachments, status_value = params[:7]
@@ -462,7 +721,9 @@ def polis_client(monkeypatch):
     from app.main import app
     from app.routes import agents as agents_routes
     from app.routes import auth as auth_routes
+    from app.routes import community as community_routes
     from app.routes import jobs as jobs_routes
+    from app.routes import tasks as tasks_routes
     import app.dependencies as dependencies
 
     store = FakePolisStore()
@@ -472,7 +733,9 @@ def polis_client(monkeypatch):
 
     monkeypatch.setattr(auth_routes, "get_db_connection", connection_factory)
     monkeypatch.setattr(agents_routes, "get_db_connection", connection_factory)
+    monkeypatch.setattr(community_routes, "get_db_connection", connection_factory)
     monkeypatch.setattr(jobs_routes, "get_db_connection", connection_factory)
+    monkeypatch.setattr(tasks_routes, "get_db_connection", connection_factory)
     monkeypatch.setattr(dependencies, "get_db_connection", connection_factory)
 
     def fake_upload(*, data: bytes, filename: str, content_type: str, owner_id: uuid.UUID):
@@ -491,6 +754,215 @@ def polis_client(monkeypatch):
     client = TestClient(app)
     client.store = store
     return client
+
+
+def test_agent_registration_does_not_require_manual_skills_or_capabilities(polis_client):
+    user_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "noskills@example.com",
+            "password": "secret123",
+            "username": "noskills",
+        },
+    )
+    assert user_response.status_code == 200
+    token = user_response.json()["token"]
+
+    create_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "generalist",
+            "display_name": "Generalist",
+            "description": "Reads task descriptions and decides whether to act.",
+            "endpoint_url": "https://agent.example/a2a",
+            "auth_method": "none",
+        },
+    )
+
+    assert create_response.status_code == 200
+    body = create_response.json()
+    assert body["agent_card"]["name"] == "generalist"
+    assert body["agent_card"]["description"] == "Reads task descriptions and decides whether to act."
+    assert body["agent_card"]["url"] == "https://agent.example/a2a"
+    assert "capabilities" not in body["agent_card"]
+    assert body["skills"] == []
+
+
+def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "task-owner@example.com",
+            "password": "secret123",
+            "username": "taskowner",
+        },
+    )
+    assert owner_response.status_code == 200
+    owner_token = owner_response.json()["token"]
+
+    agent_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "name": "task-runner",
+            "display_name": "Task Runner",
+            "description": "Handles general tasks from descriptions.",
+            "auth_method": "none",
+        },
+    )
+    assert agent_response.status_code == 200
+    agent = agent_response.json()
+    agent_token = agent["token"]
+
+    create_response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Summarize a short brief",
+            "description": "Read the brief and return three bullets.",
+            "assigned_agent_id": agent["id"],
+        },
+    )
+    assert create_response.status_code == 200
+    task_id = create_response.json()["task_id"]
+
+    pending_response = polis_client.get(
+        "/api/v1/tasks/pending",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert pending_response.status_code == 200
+    pending = pending_response.json()
+    assert [task["id"] for task in pending] == [task_id]
+    assert pending[0]["status"] == "open"
+
+    claim_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/claim",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert claim_response.status_code == 200
+    assert claim_response.json()["status"] == "in_progress"
+    assert claim_response.json()["assigned_agent_id"] == agent["id"]
+
+    complete_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/complete",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"result": {"bullets": ["one", "two", "three"]}},
+    )
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "completed"
+
+    failed_task = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Impossible task",
+            "description": "Try a task that will fail.",
+        },
+    ).json()
+    fail_claim = polis_client.post(
+        f"/api/v1/tasks/{failed_task['task_id']}/claim",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert fail_claim.status_code == 200
+
+    fail_response = polis_client.post(
+        f"/api/v1/tasks/{failed_task['task_id']}/fail",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"error": "Input was missing."},
+    )
+    assert fail_response.status_code == 200
+    assert fail_response.json()["status"] == "failed"
+
+
+def test_community_posts_comments_likes_and_agent_task_share(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "community-owner@example.com",
+            "password": "secret123",
+            "username": "communityowner",
+            "display_name": "Community Owner",
+        },
+    )
+    assert owner_response.status_code == 200
+    owner_token = owner_response.json()["token"]
+
+    agent_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "name": "community-agent",
+            "display_name": "Community Agent",
+            "description": "Shares useful task notes.",
+            "auth_method": "none",
+        },
+    )
+    assert agent_response.status_code == 200
+    agent = agent_response.json()
+    agent_token = agent["token"]
+
+    post_response = polis_client.post(
+        "/api/v1/community/posts",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "How should agents describe their work?",
+            "content": "Looking for examples from agents that completed real tasks.",
+            "category": "tech",
+        },
+    )
+    assert post_response.status_code == 200
+    post_id = post_response.json()["post_id"]
+
+    list_response = polis_client.get("/api/v1/community/posts", params={"category": "tech"})
+    assert list_response.status_code == 200
+    posts = list_response.json()["posts"]
+    assert [post["id"] for post in posts] == [post_id]
+    assert posts[0]["author_type"] == "user"
+    assert posts[0]["author_name"] == "Community Owner"
+    assert posts[0]["category"] == "tech"
+    assert posts[0]["likes"] == 0
+
+    comment_response = polis_client.post(
+        f"/api/v1/community/posts/{post_id}/comments",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"content": "A short result summary and a failure note both help."},
+    )
+    assert comment_response.status_code == 200
+
+    comments_response = polis_client.get(f"/api/v1/community/posts/{post_id}/comments")
+    assert comments_response.status_code == 200
+    assert comments_response.json()["comments"][0]["content"] == "A short result summary and a failure note both help."
+
+    first_like = polis_client.post(
+        f"/api/v1/community/posts/{post_id}/like",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    second_like = polis_client.post(
+        f"/api/v1/community/posts/{post_id}/like",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert first_like.status_code == 200
+    assert second_like.status_code == 200
+    assert first_like.json()["likes"] == 1
+    assert second_like.json()["likes"] == 1
+
+    share_response = polis_client.post(
+        "/api/v1/community/agent/task-share",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "task_title": "Summarize API notes",
+            "summary": "Finished a concise API summary with three implementation risks.",
+            "category": "showcase",
+        },
+    )
+    assert share_response.status_code == 200
+    showcase_response = polis_client.get("/api/v1/community/posts", params={"category": "showcase"})
+    assert showcase_response.status_code == 200
+    showcase = showcase_response.json()["posts"][0]
+    assert showcase["author_type"] == "agent"
+    assert showcase["author_id"] == agent["id"]
+    assert showcase["title"] == "完成任务：Summarize API notes"
 
 
 def test_polis_v1_happy_path_and_concurrency_guard(polis_client):

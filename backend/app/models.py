@@ -73,9 +73,10 @@ class AgentRegisterResponse(BaseModel):
 class TaskCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str
-    category: str
+    category: str = "general"
     difficulty: Optional[str] = None
     required_capabilities: Optional[List[str]] = None
+    assigned_agent_id: Optional[UUID] = None
     estimated_hours: Optional[int] = None
     reward_points: int = Field(default=0, ge=0)
     deadline: Optional[datetime] = None
@@ -83,6 +84,20 @@ class TaskCreateRequest(BaseModel):
 
 class TaskCreateResponse(BaseModel):
     task_id: UUID
+
+class TaskCompleteRequest(BaseModel):
+    result: Optional[Any] = None
+    deliverable_url: Optional[str] = None
+
+class TaskFailRequest(BaseModel):
+    error: Optional[str] = None
+
+class TaskStatusResponse(BaseModel):
+    id: UUID
+    status: str
+    assigned_agent_id: Optional[UUID] = None
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
 class TaskListResponse(BaseModel):
     id: UUID
@@ -224,6 +239,70 @@ class FeedResponse(BaseModel):
     total: int
 
 
+# ============ Community Models ============
+
+CommunityCategory = Literal["chat", "showcase", "tech", "help"]
+
+
+class CommunityPostCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=256)
+    content: str = Field(..., min_length=1, max_length=10000)
+    category: CommunityCategory
+
+
+class CommunityPostCreateResponse(BaseModel):
+    post_id: UUID
+
+
+class CommunityPostResponse(BaseModel):
+    id: UUID
+    title: str
+    content: str
+    author_type: Literal["user", "agent"]
+    author_id: UUID
+    author_name: Optional[str] = None
+    category: CommunityCategory
+    likes: int = 0
+    comment_count: int = 0
+    liked_by_me: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class CommunityPostListResponse(BaseModel):
+    posts: List[CommunityPostResponse]
+    total: int
+
+
+class CommunityCommentCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class CommunityCommentResponse(BaseModel):
+    id: UUID
+    post_id: UUID
+    author_type: Literal["user", "agent"]
+    author_id: UUID
+    author_name: Optional[str] = None
+    content: str
+    created_at: datetime
+
+
+class CommunityCommentListResponse(BaseModel):
+    comments: List[CommunityCommentResponse]
+
+
+class CommunityLikeResponse(BaseModel):
+    liked: bool
+    likes: int
+
+
+class AgentTaskShareRequest(BaseModel):
+    task_title: str = Field(..., min_length=1, max_length=200)
+    summary: str = Field(..., min_length=1, max_length=5000)
+    category: CommunityCategory = "showcase"
+
+
 # ============ Polis v1 A2A-compatible Models ============
 
 class UserRegisterRequest(BaseModel):
@@ -277,7 +356,7 @@ class AgentCreateRequest(BaseModel):
     websocket_id: Optional[str] = None
     auth_method: Literal["bearer", "hmac", "none"] = "none"
     auth_config: Dict[str, Any] = Field(default_factory=dict)
-    agent_card: Dict[str, Any]
+    agent_card: Dict[str, Any] = Field(default_factory=dict)
     status: Literal["online", "offline", "busy"] = "offline"
     skills: List[str] = Field(
         default_factory=list,

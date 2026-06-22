@@ -1,34 +1,184 @@
 /**
- * 我的 Agent 列表 /agents
+ * My agents
  */
 'use client';
 
 import Link from 'next/link';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
 import Loading from '@/components/Loading';
-import type { AgentSkill, AgentStatus } from '@/lib/api/types';
-import { BotIcon, RocketIcon, CheckIcon, ClockIcon } from '@/components/icons/Icon';
+import type { Agent, AgentSkill, AgentStatus } from '@/lib/api/types';
+import {
+  BotIcon,
+  CheckIcon,
+  ClockIcon,
+  GemIcon,
+  RocketIcon,
+  StarIcon,
+  TrophyIcon,
+} from '@/components/icons/Icon';
 import { formatDateTime, relativeTime } from '@/lib/format';
 
 const STATUS_META: Record<AgentStatus, { label: string; color: string; bg: string }> = {
-  online: { label: '在线', color: '#2e7d32', bg: '#e8f5e9' },
-  busy: { label: '忙碌', color: '#e65100', bg: '#fff3e0' },
-  offline: { label: '离线', color: '#546e7a', bg: '#eceff1' },
+  online: { label: '在线', color: '#166534', bg: '#dcfce7' },
+  busy: { label: '忙碌', color: '#9a3412', bg: '#ffedd5' },
+  offline: { label: '离线', color: '#475569', bg: '#f1f5f9' },
 };
 
 function skillId(skill: AgentSkill | string) {
   return typeof skill === 'string' ? skill : skill.skill_id || skill.name;
 }
 
+function AgentCardShell({
+  agent,
+  onHeartbeat,
+  onRemove,
+  heartbeatPending,
+  removePending,
+}: {
+  agent: Agent;
+  onHeartbeat: (id: string) => void;
+  onRemove: (id: string) => void;
+  heartbeatPending: boolean;
+  removePending: boolean;
+}) {
+  const meta = STATUS_META[agent.status];
+  const level = agent.level ?? 1;
+  const xp = agent.xp ?? 0;
+  const badgeCount = agent.badge_count ?? 0;
+  const completed = agent.total_tasks_completed ?? agent.total_jobs ?? 0;
+  const failed = agent.total_tasks_failed ?? 0;
+  const rating = agent.avg_rating != null ? agent.avg_rating.toFixed(1) : '-';
+  const skills = agent.skills?.length ? agent.skills : agent.agent_card?.skills ?? [];
+
+  return (
+    <article className="rounded-lg border border-slate-100 bg-white p-5 shadow-sm transition hover:border-[#bfdbfe] hover:shadow-md sm:p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#eff6ff] text-[#1d4ed8]">
+              <BotIcon size={21} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="truncate text-lg font-semibold text-slate-950">
+                {agent.display_name || agent.name}
+              </h3>
+              <code className="text-xs text-slate-500">{agent.name}</code>
+            </div>
+            <span
+              className="rounded-full px-3 py-1 text-xs font-semibold"
+              style={{ background: meta.bg, color: meta.color }}
+            >
+              {meta.label}
+            </span>
+          </div>
+
+          <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600">
+            {agent.description || '这个 agent 还没有填写介绍。'}
+          </p>
+
+          {skills.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {skills.slice(0, 6).map((skill) => {
+                const id = skillId(skill);
+                return (
+                  <span
+                    key={id}
+                    className="rounded-full bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
+                  >
+                    {id}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg bg-[#eff6ff] p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-[#1d4ed8]">
+                <TrophyIcon size={15} />
+                等级
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-slate-950">Lv {level}</div>
+              <div className="mt-1 text-xs text-slate-500">{xp} XP</div>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <GemIcon size={15} />
+                徽章
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-slate-950">{badgeCount}</div>
+              <div className="mt-1 text-xs text-slate-500">{completed} 次完成</div>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <StarIcon size={15} />
+                评分
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-slate-950">{rating}</div>
+              <div className="mt-1 text-xs text-slate-500">失败 {failed}</div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-2 text-xs text-slate-500 lg:grid-cols-2">
+            <span className="min-w-0">
+              endpoint: <span className="break-all font-mono">{agent.endpoint_url || '未配置'}</span>
+            </span>
+            <span>
+              auth: <code className="rounded bg-slate-100 px-1.5 py-0.5">{agent.auth_method}</code>
+            </span>
+            <span className="flex items-center gap-1">
+              <CheckIcon size={12} strokeWidth={2} />
+              成功率 {agent.success_rate != null ? (agent.success_rate * 100).toFixed(0) : '-'}%
+            </span>
+            {agent.last_heartbeat_at && (
+              <span className="flex items-center gap-1">
+                <ClockIcon size={12} strokeWidth={2} />
+                最近心跳 {relativeTime(agent.last_heartbeat_at)}
+              </span>
+            )}
+            <span className="text-slate-400">创建于 {formatDateTime(agent.created_at)}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 lg:w-32 lg:grid-cols-1">
+          <Link
+            href={`/agents/${agent.id}/install`}
+            className="inline-flex items-center justify-center rounded-lg bg-[#1d4ed8] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1e40af] active:translate-y-px"
+          >
+            接入电脑
+          </Link>
+          <button
+            type="button"
+            onClick={() => onHeartbeat(agent.id)}
+            disabled={heartbeatPending}
+            className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 active:translate-y-px disabled:opacity-50"
+          >
+            心跳
+          </button>
+          <button
+            type="button"
+            onClick={() => onRemove(agent.id)}
+            disabled={removePending}
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 active:translate-y-px disabled:opacity-50"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function AgentsPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useAuthStore();
+  const authed = isAuthenticated();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['agents', 'mine'],
     queryFn: () => agentsApi.listMine(),
-    enabled: isAuthenticated(),
+    enabled: authed,
   });
 
   const heartbeatMutation = useMutation({
@@ -40,32 +190,38 @@ export default function AgentsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents', 'mine'] }),
   });
 
-  if (!isAuthenticated()) {
+  const handleRemove = (agent: Agent) => {
+    if (confirm(`确定删除 agent「${agent.display_name || agent.name}」？`)) {
+      removeMutation.mutate(agent.id);
+    }
+  };
+
+  if (!authed) {
     return (
-      <div className="max-w-md mx-auto mt-12 px-6">
-        <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
-          <div className="font-medium text-gray-900 mb-2">需要登录后查看 agent</div>
-          <Link href="/login" className="text-blue-600 hover:underline text-sm">
-            去登录 →
+      <main className="mx-auto max-w-md px-6 py-12">
+        <div className="rounded-lg bg-white p-8 text-center shadow-sm">
+          <BotIcon size={42} className="mx-auto mb-4 text-slate-300" />
+          <div className="mb-2 font-semibold text-slate-950">需要登录后查看 agent</div>
+          <Link href="/login" className="text-sm font-medium text-[#1d4ed8] hover:underline">
+            去登录
           </Link>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10">
-      <div className="flex items-center justify-between mb-6">
+    <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">我的 Agent</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            按 A2A Agent Card 标准注册，挂自己的 endpoint URL 接任务
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">我的 Agent</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+            注册 endpoint 后开始接任务，完成记录会沉淀为等级、徽章和评分。
           </p>
         </div>
         <Link
           href="/agents/new"
-          className="px-5 py-2.5 text-sm text-white rounded-xl font-medium transition-all hover:shadow-md flex items-center gap-1.5"
-          style={{ background: '#5b8def' }}
+          className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1e40af] active:translate-y-px"
         >
           <RocketIcon size={16} strokeWidth={2} />
           注册 Agent
@@ -75,20 +231,19 @@ export default function AgentsPage() {
       {isLoading ? (
         <Loading />
       ) : isError ? (
-        <div className="bg-white rounded-2xl p-8 text-center text-sm text-gray-500">
+        <div className="rounded-lg bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
           加载失败：{(error as Error)?.message || '请检查后端服务'}
         </div>
       ) : !data || data.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 text-center">
-          <BotIcon size={48} className="text-gray-300 mx-auto mb-3" strokeWidth={1.5} />
-          <div className="text-gray-700 font-medium mb-2">还没有 agent</div>
-          <p className="text-sm text-gray-500 mb-5">
-            注册一个就能开始接 A2A 任务，跑完任务获得信誉分 + credit
+        <div className="rounded-lg bg-white p-12 text-center shadow-sm">
+          <BotIcon size={48} className="mx-auto mb-4 text-slate-300" strokeWidth={1.5} />
+          <div className="mb-2 font-semibold text-slate-800">还没有 agent</div>
+          <p className="mx-auto mb-5 max-w-md text-sm leading-6 text-slate-500">
+            注册一个就能开始接 A2A 任务，跑完任务获得 XP、等级和社区曝光。
           </p>
           <Link
             href="/agents/new"
-            className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm text-white rounded-xl font-medium hover:shadow-md transition-all"
-            style={{ background: '#5b8def' }}
+            className="inline-flex items-center gap-2 rounded-full bg-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1e40af] active:translate-y-px"
           >
             <RocketIcon size={15} strokeWidth={2} />
             注册第一个 Agent
@@ -96,109 +251,18 @@ export default function AgentsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {data.map((agent) => {
-            const meta = STATUS_META[agent.status];
-            return (
-              <div key={agent.id} className="bg-white rounded-3xl p-6 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-lg font-bold text-gray-900">
-                        {agent.display_name || agent.name}
-                      </h3>
-                      <span
-                        className="px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                        style={{ background: meta.bg, color: meta.color }}
-                      >
-                        {meta.label}
-                      </span>
-                    </div>
-                    <code className="text-xs text-gray-500 font-mono">{agent.name}</code>
-                    <p className="text-sm text-gray-600 mt-2 leading-relaxed">
-                      {agent.description}
-                    </p>
-
-                    {(() => {
-                      // 后端有时只在 agent_card 里返回 skills，做向后兼容
-                      const skills = agent.skills?.length
-                        ? agent.skills
-                        : agent.agent_card?.skills ?? [];
-                      if (!skills.length) return null;
-                      return (
-                        <div className="flex flex-wrap gap-1.5 mt-3">
-                          {skills.map((s) => {
-                            const id = skillId(s);
-                            return (
-                              <span
-                                key={id}
-                                className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                                style={{ background: '#eef2ff', color: '#4338ca' }}
-                              >
-                                #{id}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-4 text-xs text-gray-500">
-                      <span>endpoint: <span className="font-mono">{agent.endpoint_url}</span></span>
-                      <span>auth: <code className="bg-gray-100 px-1.5 rounded">{agent.auth_method}</code></span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-2 text-xs text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <CheckIcon size={12} strokeWidth={2} />
-                        总任务 {agent.total_jobs}
-                      </span>
-                      <span>成功率 {agent.success_rate != null ? (agent.success_rate * 100).toFixed(0) : '-'}%</span>
-                      <span>评分 {agent.avg_rating != null ? agent.avg_rating.toFixed(1) : '-'}</span>
-                      {agent.last_heartbeat_at && (
-                        <span className="flex items-center gap-1">
-                          <ClockIcon size={12} strokeWidth={2} />
-                          最近心跳 {relativeTime(agent.last_heartbeat_at)}
-                        </span>
-                      )}
-                      <span className="text-gray-400">
-                        创建于 {formatDateTime(agent.created_at)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <Link
-                      href={`/agents/${agent.id}/install`}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-white text-center hover:shadow-md transition-all"
-                      style={{ background: '#5b8def' }}
-                    >
-                      接入电脑
-                    </Link>
-                    <button
-                      onClick={() => heartbeatMutation.mutate(agent.id)}
-                      disabled={heartbeatMutation.isPending}
-                      className="px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-xs font-medium text-gray-700 disabled:opacity-50"
-                    >
-                      心跳
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`确定删除 agent「${agent.display_name || agent.name}」？`)) {
-                          removeMutation.mutate(agent.id);
-                        }
-                      }}
-                      disabled={removeMutation.isPending}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      删除
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {data.map((agent) => (
+            <AgentCardShell
+              key={agent.id}
+              agent={agent}
+              onHeartbeat={(id) => heartbeatMutation.mutate(id)}
+              onRemove={() => handleRemove(agent)}
+              heartbeatPending={heartbeatMutation.isPending}
+              removePending={removeMutation.isPending}
+            />
+          ))}
         </div>
       )}
-    </div>
+    </main>
   );
 }

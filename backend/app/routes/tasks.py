@@ -10,6 +10,7 @@ from datetime import datetime
 from app.models import (
     TaskCreateRequest, TaskCreateResponse,
     TaskListResponse, TaskDetailResponse,
+    TaskCompleteRequest, TaskFailRequest, TaskStatusResponse,
     TaskApplyRequest, TaskApplyResponse,
     TaskAssignRequest, TaskAssignResponse,
     TaskSubmitRequest, TaskSubmitResponse,
@@ -17,13 +18,33 @@ from app.models import (
     AgentTasksResponse
 )
 from app.database import get_db_connection
-from app.dependencies import get_current_owner, get_current_agent
+from app.dependencies import get_current_owner, get_current_agent, get_current_user
 from app.fraud_detection import detect_collusion
 from app.services import anti_fraud as anti_fraud_svc
+from app.routes.notifications import create_notification
 import logging
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 logger = logging.getLogger(__name__)
+
+
+TASK_LIST_COLUMNS = """
+    t.id, t.owner_id, t.title, t.description, t.category, t.difficulty,
+    t.reward_points, t.status, t.created_at, t.updated_at, t.completed_at,
+    t.deadline, t.assigned_agent_id, t.estimated_hours, t.deliverable_type,
+    t.required_capabilities, t.verification_required
+"""
+
+
+def _task_status_response(row) -> TaskStatusResponse:
+    return TaskStatusResponse(
+        id=row["id"],
+        status=row["status"],
+        assigned_agent_id=row.get("assigned_agent_id"),
+        updated_at=row.get("updated_at"),
+        completed_at=row.get("completed_at"),
+    )
+
 
 @router.post("", response_model=TaskCreateResponse)
 def create_task(
@@ -45,15 +66,16 @@ def create_task(
                 INSERT INTO tasks (
                     owner_id, title, description, category, difficulty,
                     required_capabilities, estimated_hours, reward_points,
-                    deadline, deliverable_type
+                    deadline, deliverable_type, assigned_agent_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     str(owner_id), request.title, request.description, request.category,
                     request.difficulty, Json(required_capabilities), request.estimated_hours,
-                    request.reward_points, request.deadline, request.deliverable_type
+                    request.reward_points, request.deadline, request.deliverable_type,
+                    str(request.assigned_agent_id) if request.assigned_agent_id else None
                 )
             )
             result = cur.fetchone()
@@ -77,33 +99,14 @@ def list_tasks(
     status_filter: Optional[str] = Query(None, alias="status"),
     category: Optional[str] = Query(None)
 ):
-    """List tasks with optional filters.
-
-    返回完整字段（含 enrichment 字段：view_count / favorite_count / comment_count /
-    application_count / skills_required / cover_emoji / cover_gradient / urgent /
-    featured / deadline），并 LEFT JOIN owners 把发布者卡片信息一并带出（owner_*）。
-    """
+    """List tasks with optional filters."""
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
 
-            query = """
-                SELECT
-                    t.id, t.owner_id, t.title, t.description, t.category, t.difficulty,
-                    t.reward_points, t.status, t.created_at, t.updated_at, t.completed_at,
-                    t.deadline, t.assigned_agent_id, t.estimated_hours, t.deliverable_type,
-                    t.required_capabilities, t.verification_required,
-                    t.view_count, t.favorite_count, t.comment_count, t.application_count,
-                    t.skills_required, t.cover_emoji, t.cover_gradient,
-                    t.urgent, t.featured,
-                    o.display_name     AS owner_display_name,
-                    o.organization     AS owner_organization,
-                    o.rating           AS owner_rating,
-                    o.verified         AS owner_verified,
-                    o.avatar_gradient  AS owner_avatar_gradient,
-                    o.email            AS owner_email
+            query = f"""
+                SELECT {TASK_LIST_COLUMNS}
                 FROM tasks t
-                LEFT JOIN owners o ON o.id = t.owner_id
                 WHERE 1=1
             """
             params = []
@@ -116,7 +119,7 @@ def list_tasks(
                 query += " AND t.category = %s"
                 params.append(category)
 
-            query += " ORDER BY t.featured DESC, t.created_at DESC"
+            query += " ORDER BY t.created_at DESC"
 
             cur.execute(query, params)
             tasks = cur.fetchall()
@@ -131,6 +134,187 @@ def list_tasks(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task listing failed"
         )
+
+
+@router.get("/pending", response_model=List[TaskListResponse])
+def pending_tasks(agent_id: UUID = Depends(get_current_agent)):
+    """Return open tasks visible to the polling agent."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                SELECT {TASK_LIST_COLUMNS}
+                FROM tasks t
+                WHERE t.status = 'open'
+                  AND (t.assigned_agent_id IS NULL OR t.assigned_agent_id = %s)
+                ORDER BY t.created_at ASC
+                """,
+                (str(agent_id),),
+            )
+            return [TaskListResponse(**dict(task)) for task in cur.fetchall()]
+
+    except Exception as e:
+        logger.error(f"Pending task fetch failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Pending task fetch failed",
+        )
+
+
+@router.post("/{task_id}/claim", response_model=TaskStatusResponse)
+def claim_task(
+    task_id: UUID,
+    agent_id: UUID = Depends(get_current_agent),
+):
+    """Agent claims an open task."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, status, assigned_agent_id FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if task["status"] != "open":
+                raise HTTPException(status_code=409, detail="Task is not open")
+            assigned_agent_id = task.get("assigned_agent_id")
+            if assigned_agent_id and assigned_agent_id != agent_id:
+                raise HTTPException(status_code=403, detail="Task is reserved for another agent")
+
+            cur.execute(
+                """
+                UPDATE tasks
+                SET assigned_agent_id = %s, status = 'in_progress', updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, status, assigned_agent_id, updated_at, completed_at, owner_id, title
+                """,
+                (str(agent_id), str(task_id)),
+            )
+            updated_task = cur.fetchone()
+
+            # 通知任务发布者
+            create_notification(
+                conn,
+                updated_task['owner_id'],
+                'task_accepted',
+                '任务已被接受',
+                f'您的任务「{updated_task["title"]}」已被 Agent 接受',
+                f'/tasks/{task_id}'
+            )
+
+            return _task_status_response(updated_task)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task claim failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task claim failed",
+        )
+
+
+@router.post("/{task_id}/complete", response_model=TaskStatusResponse)
+def complete_task(
+    task_id: UUID,
+    request: TaskCompleteRequest,
+    agent_id: UUID = Depends(get_current_agent),
+):
+    """Agent marks an in-progress task as completed."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if task.get("assigned_agent_id") != agent_id:
+                raise HTTPException(status_code=403, detail="You are not assigned to this task")
+            if task["status"] != "in_progress":
+                raise HTTPException(status_code=409, detail="Task is not in progress")
+
+            cur.execute(
+                """
+                UPDATE tasks
+                SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, status, assigned_agent_id, updated_at, completed_at
+                """,
+                (str(task_id),),
+            )
+
+            # 通知任务发布者
+            create_notification(
+                conn,
+                task['owner_id'],
+                'task_completed',
+                '任务已完成',
+                f'您的任务「{task["title"]}」已完成，请查看并评分',
+                f'/tasks/{task_id}'
+            )
+
+            logger.info(f"Task {task_id} completed by agent {agent_id}")
+            return _task_status_response(cur.fetchone())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task completion failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task completion failed",
+        )
+
+
+@router.post("/{task_id}/fail", response_model=TaskStatusResponse)
+def fail_task(
+    task_id: UUID,
+    request: TaskFailRequest,
+    agent_id: UUID = Depends(get_current_agent),
+):
+    """Agent marks an in-progress task as failed."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, status, assigned_agent_id FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if task.get("assigned_agent_id") != agent_id:
+                raise HTTPException(status_code=403, detail="You are not assigned to this task")
+            if task["status"] != "in_progress":
+                raise HTTPException(status_code=409, detail="Task is not in progress")
+
+            cur.execute(
+                """
+                UPDATE tasks
+                SET status = 'failed', updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, status, assigned_agent_id, updated_at, completed_at
+                """,
+                (str(task_id),),
+            )
+            logger.info(f"Task {task_id} failed by agent {agent_id}: {request.error}")
+            return _task_status_response(cur.fetchone())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task failure update failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task failure update failed",
+        )
+
 
 @router.get("/{task_id}", response_model=TaskDetailResponse)
 def get_task_detail(task_id: UUID):
@@ -531,4 +715,174 @@ def review_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task review failed"
+        )
+
+
+@router.post("/{task_id}/rate")
+def rate_task(
+    task_id: UUID,
+    rating: int = Query(..., ge=1, le=5),
+    comment: Optional[str] = None,
+    user_id: UUID = Depends(get_current_user)
+):
+    """用户给已完成的任务评分"""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+
+            # 验证任务存在且已完成
+            cur.execute(
+                "SELECT owner_id, assigned_agent_id, status FROM tasks WHERE id = %s",
+                (str(task_id),)
+            )
+            task = cur.fetchone()
+
+            if not task:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Task not found"
+                )
+
+            if task['status'] != 'completed':
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Task is not completed yet"
+                )
+
+            if task['owner_id'] != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't own this task"
+                )
+
+            if not task['assigned_agent_id']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Task has no assigned agent"
+                )
+
+            agent_id = task['assigned_agent_id']
+
+            # 插入评分（如果已存在则更新）
+            cur.execute(
+                """
+                INSERT INTO task_ratings (task_id, user_id, agent_id, rating, comment)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (task_id) DO UPDATE
+                SET rating = EXCLUDED.rating, comment = EXCLUDED.comment
+                RETURNING id
+                """,
+                (str(task_id), str(user_id), str(agent_id), rating, comment)
+            )
+            result = cur.fetchone()
+
+            # 更新 agent 游戏化数据
+            xp_gain = rating * 20  # 1星=20XP, 5星=100XP
+            cur.execute(
+                """
+                UPDATE agents
+                SET
+                    xp = xp + %s,
+                    level = FLOOR((xp + %s) / 100.0) + 1,
+                    total_tasks_completed = total_tasks_completed + 1
+                WHERE id = %s
+                RETURNING xp, level
+                """,
+                (xp_gain, xp_gain, str(agent_id))
+            )
+            agent_result = cur.fetchone()
+
+            # 创建通知给 agent owner
+            cur.execute("SELECT owner_id FROM agents WHERE id = %s", (str(agent_id),))
+            agent_owner = cur.fetchone()
+            if agent_owner:
+                create_notification(
+                    conn,
+                    agent_owner['owner_id'],
+                    'task_rated',
+                    f'任务获得 {rating} 星评价',
+                    f'您的 Agent 完成的任务获得了 {rating} 星评价，获得 {xp_gain} XP！',
+                    f'/tasks/{task_id}'
+                )
+
+            # 检查徽章
+            _check_and_award_badges(conn, agent_id)
+
+            logger.info(f"Task {task_id} rated {rating} stars, agent {agent_id} gained {xp_gain} XP")
+
+            return {
+                "success": True,
+                "rating_id": result['id'],
+                "xp_gained": xp_gain,
+                "agent_xp": agent_result['xp'],
+                "agent_level": agent_result['level']
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Task rating failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task rating failed"
+        )
+
+
+def _check_and_award_badges(conn, agent_id: UUID):
+    """检查并授予徽章"""
+    cur = conn.cursor()
+
+    # 徽章 1: 首次完成任务
+    cur.execute(
+        "SELECT total_tasks_completed FROM agents WHERE id = %s",
+        (str(agent_id),)
+    )
+    agent = cur.fetchone()
+    if agent and agent['total_tasks_completed'] == 1:
+        cur.execute(
+            """
+            INSERT INTO badges (agent_id, badge_type)
+            VALUES (%s, %s)
+            ON CONFLICT (agent_id, badge_type) DO NOTHING
+            """,
+            (str(agent_id), 'first_task')
+        )
+
+    # 徽章 2: 连续 5 个 5 星评价
+    cur.execute(
+        """
+        SELECT COUNT(*) as count
+        FROM (
+            SELECT rating
+            FROM task_ratings
+            WHERE agent_id = %s
+            ORDER BY created_at DESC
+            LIMIT 5
+        ) recent
+        WHERE rating = 5
+        """,
+        (str(agent_id),)
+    )
+    result = cur.fetchone()
+    if result and result['count'] == 5:
+        cur.execute(
+            """
+            INSERT INTO badges (agent_id, badge_type)
+            VALUES (%s, %s)
+            ON CONFLICT (agent_id, badge_type) DO NOTHING
+            """,
+            (str(agent_id), 'five_star_streak')
+        )
+
+    # 徽章 3: 完成 10 个任务
+    if agent and agent['total_tasks_completed'] >= 10:
+        cur.execute(
+            """
+            INSERT INTO badges (agent_id, badge_type)
+            VALUES (%s, %s)
+            ON CONFLICT (agent_id, badge_type) DO NOTHING
+            """,
+            (str(agent_id), 'veteran')
         )

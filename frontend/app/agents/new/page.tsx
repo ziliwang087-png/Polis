@@ -3,7 +3,7 @@
  *
  * v1.1 简化版：
  * - 默认走 Pull 模式（demo_agent.py 那条路），用户不需要填 endpoint URL / auth
- * - 主表单只剩 显示名 / 描述 / 技能
+ * - 主表单只剩 显示名 / 描述
  * - name(slug) 从显示名自动生成
  * - webhook 模式藏到"高级"折叠区，明示"暂未启用"
  * - 注册成功后给出 demo_agent.py 启动命令，可复制
@@ -48,19 +48,12 @@ function toSlug(s: string) {
   return cleaned;
 }
 
-const SUGGESTED_SKILLS = [
-  'python', 'translation', 'code_review', 'writing',
-  'research', 'data_analysis', 'design', 'sql',
-];
-
 export default function NewAgentPage() {
   const { isAuthenticated, user } = useAuthStore();
 
   // ---- 主表单 ----
   const [displayName, setDisplayName] = useState('');
   const [description, setDescription] = useState('');
-  const [skills, setSkills] = useState<string[]>([]);
-  const [skillInput, setSkillInput] = useState('');
 
   // ---- 高级（暂未启用） ----
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -69,14 +62,14 @@ export default function NewAgentPage() {
   const [authToken, setAuthToken] = useState('');
 
   // ---- 注册成功后展示给用户的启动命令 ----
-  const [createdAgent, setCreatedAgent] = useState<{ name: string; skills: string[] } | null>(null);
+  const [createdAgent, setCreatedAgent] = useState<{ name: string } | null>(null);
 
   const slug = useMemo(() => toSlug(displayName) || 'my-agent', [displayName]);
 
   const createMutation = useMutation({
     mutationFn: (payload: AgentCreatePayload) => agentsApi.create(payload),
     onSuccess: (_data, variables) => {
-      setCreatedAgent({ name: variables.name, skills });
+      setCreatedAgent({ name: variables.name });
     },
   });
 
@@ -99,8 +92,7 @@ export default function NewAgentPage() {
     const cmd = `python3 demo_agent.py \\
   --api ${apiRoot} \\
   --email ${user?.email ?? 'YOUR_EMAIL'} --password YOUR_PASSWORD \\
-  --agent-name ${createdAgent.name} \\
-  --skills ${createdAgent.skills.join(',')}`;
+  --agent-name ${createdAgent.name}`;
 
     return (
       <div className="max-w-3xl mx-auto px-6 py-10">
@@ -155,21 +147,8 @@ export default function NewAgentPage() {
   }
 
   // ---- 注册主表单 ----
-  const addSkill = (raw: string) => {
-    const s = raw.trim().toLowerCase().replace(/\s+/g, '_');
-    if (!s || skills.includes(s)) return;
-    setSkills((arr) => [...arr, s]);
-    setSkillInput('');
-  };
-  const removeSkill = (s: string) => setSkills((arr) => arr.filter((x) => x !== s));
-
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (skills.length === 0) {
-      alert('至少选 1 个技能');
-      return;
-    }
-    // 后端 AgentCreateRequest.skills 是 List[str]，agent_card 里也放一份保持 A2A 标准
     const payload: AgentCreatePayload = {
       name: slug,
       display_name: displayName.trim() || slug,
@@ -181,9 +160,7 @@ export default function NewAgentPage() {
         : {},
       agent_card: {
         version: '1.0',
-        skills: skills.map((s) => ({ skill_id: s, name: s, description: '' })),
       },
-      skills,  // string[] for backend
       status: 'offline',
     };
     createMutation.mutate(payload);
@@ -228,75 +205,10 @@ export default function NewAgentPage() {
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
               placeholder="比如：用 Claude 把英文 README 翻译成中文，保留代码块和链接。"
             />
+            <p className="text-sm text-gray-500 mt-2">
+              💡 Agent 会根据任务描述自主判断能力，无需手动配置技能
+            </p>
           </label>
-
-          <div>
-            <span className="text-sm font-medium text-gray-700 mb-2 block">
-              技能（至少 1 个） *
-            </span>
-
-            {/* 已选 chips */}
-            {skills.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {skills.map((s) => (
-                  <span
-                    key={s}
-                    className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-mono"
-                  >
-                    {s}
-                    <button
-                      type="button"
-                      onClick={() => removeSkill(s)}
-                      className="text-blue-400 hover:text-blue-700 ml-1"
-                      aria-label={`移除 ${s}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* 自由输入 */}
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={skillInput}
-                onChange={(e) => setSkillInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') {
-                    e.preventDefault();
-                    addSkill(skillInput);
-                  }
-                }}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none text-sm font-mono"
-                placeholder="输入技能名后回车，比如 python"
-              />
-              <button
-                type="button"
-                onClick={() => addSkill(skillInput)}
-                disabled={!skillInput.trim()}
-                className="px-4 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
-              >
-                添加
-              </button>
-            </div>
-
-            {/* 推荐 chips */}
-            <div className="text-xs text-gray-500">
-              <span className="mr-2">常见：</span>
-              {SUGGESTED_SKILLS.filter((s) => !skills.includes(s)).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => addSkill(s)}
-                  className="inline-block mr-1.5 mb-1.5 px-2.5 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-mono"
-                >
-                  + {s}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* 高级（暂未启用） */}
           <div className="border-t border-gray-100 pt-4">
@@ -372,7 +284,7 @@ export default function NewAgentPage() {
             </Link>
             <button
               type="submit"
-              disabled={createMutation.isPending || skills.length === 0}
+              disabled={createMutation.isPending}
               className="px-6 py-3 rounded-xl text-white font-semibold transition-all hover:shadow-md disabled:opacity-60 flex items-center gap-2"
               style={{ background: '#5b8def' }}
             >

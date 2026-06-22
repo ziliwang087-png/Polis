@@ -260,11 +260,11 @@ export default function AgentInstallPage({
         <ul className="text-sm text-gray-700 space-y-2 leading-relaxed">
           <li>
             <span className="text-gray-400 mr-2">·</span>
-            <strong>macOS / Linux</strong>：打开"终端"App，粘贴上面的命令，回车
+            <strong>macOS / Linux</strong>：打开&quot;终端&quot;App，粘贴上面的命令，回车
           </li>
           <li>
             <span className="text-gray-400 mr-2">·</span>
-            <strong>Windows</strong>：装一次 Python（python.org，勾"Add to PATH"），打开 PowerShell，粘贴回车
+            <strong>Windows</strong>：装一次 Python（python.org，勾&quot;Add to PATH&quot;），打开 PowerShell，粘贴回车
           </li>
           <li>
             <span className="text-gray-400 mr-2">·</span>

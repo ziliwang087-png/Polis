@@ -5,33 +5,28 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { agentsApi } from '@/lib/api/agents';
+import { useMutation } from '@tanstack/react-query';
 import { tasksApi } from '@/lib/api/tasks';
 import { useAuthStore } from '@/lib/store';
-import Loading from '@/components/Loading';
 import { CheckIcon, RocketIcon } from '@/components/icons/Icon';
 
 export default function NewTaskPage() {
   const { isAuthenticated } = useAuthStore();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [assignedAgentId, setAssignedAgentId] = useState('');
+  const [budget, setBudget] = useState(0);
+  const [deadline, setDeadline] = useState('');
+  const [priority, setPriority] = useState<'low' | 'normal' | 'urgent'>('normal');
   const [publishedTaskId, setPublishedTaskId] = useState<string | null>(null);
-
-  const agentsQuery = useQuery({
-    queryKey: ['agents', 'mine'],
-    queryFn: () => agentsApi.listMine(),
-    enabled: isAuthenticated(),
-    staleTime: 60_000,
-  });
 
   const createMutation = useMutation({
     mutationFn: () =>
       tasksApi.create({
         title: title.trim(),
         description: description.trim(),
-        assigned_agent_id: assignedAgentId || undefined,
+        budget,
+        deadline: deadline || undefined,
+        priority,
       }),
     onSuccess: (data) => {
       setPublishedTaskId(data.task_id);
@@ -64,7 +59,6 @@ export default function NewTaskPage() {
               onClick={() => {
                 setTitle('');
                 setDescription('');
-                setAssignedAgentId('');
                 setPublishedTaskId(null);
               }}
               className="px-5 py-3 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition-colors"
@@ -126,23 +120,42 @@ export default function NewTaskPage() {
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-gray-700 mb-1 block">指定 agent（可选）</span>
-            {agentsQuery.isLoading ? (
-              <Loading />
-            ) : (
-              <select
-                value={assignedAgentId}
-                onChange={(e) => setAssignedAgentId(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors bg-white"
-              >
-                <option value="">不指定，开放给所有 agent</option>
-                {(agentsQuery.data ?? []).map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.display_name || agent.name}
-                  </option>
-                ))}
-              </select>
-            )}
+            <span className="text-sm font-medium text-gray-700 mb-1 block">预算（Credits）*</span>
+            <input
+              type="number"
+              required
+              min="0"
+              value={budget}
+              onChange={(e) => setBudget(Number(e.target.value))}
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
+              placeholder="0"
+            />
+            <p className="text-xs text-gray-500 mt-1">发布任务需要支付 Credits，完成后转给 Agent</p>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700 mb-1 block">截止时间（可选）</span>
+            <input
+              type="date"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
+            />
+            <p className="text-xs text-gray-500 mt-1">建议设置截止时间，帮助 Agent 评估优先级</p>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700 mb-1 block">优先级</span>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as 'low' | 'normal' | 'urgent')}
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors bg-white"
+            >
+              <option value="low">低优先级</option>
+              <option value="normal">普通</option>
+              <option value="urgent">紧急</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">紧急任务在任务广场置顶</p>
           </label>
 
           {createMutation.isError && (

@@ -280,22 +280,37 @@ def like_post(
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Post not found")
 
-        try:
+        # 检查是否已点赞
+        cur.execute(
+            "SELECT 1 FROM post_likes WHERE post_id = %s AND user_id = %s",
+            (str(post_id), str(user_id)),
+        )
+        already_liked = cur.fetchone() is not None
+
+        if already_liked:
+            # 取消点赞
             cur.execute(
-                """
-                INSERT INTO post_likes (post_id, user_id)
-                VALUES (%s, %s)
-                ON CONFLICT (post_id, user_id) DO NOTHING
-                """,
+                "DELETE FROM post_likes WHERE post_id = %s AND user_id = %s",
                 (str(post_id), str(user_id)),
             )
-        except UniqueViolation:
-            pass
+        else:
+            # 添加点赞
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO post_likes (post_id, user_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (post_id, user_id) DO NOTHING
+                    """,
+                    (str(post_id), str(user_id)),
+                )
+            except UniqueViolation:
+                pass
 
         cur.execute("SELECT COUNT(*) AS count FROM post_likes WHERE post_id = %s", (str(post_id),))
         likes = cur.fetchone()["count"]
         cur.execute("UPDATE posts SET likes = %s WHERE id = %s", (likes, str(post_id)))
-        return CommunityLikeResponse(liked=True, likes=likes)
+        return CommunityLikeResponse(liked=not already_liked, likes=likes)
 
 
 @router.post("/agent/task-share", response_model=CommunityPostCreateResponse)

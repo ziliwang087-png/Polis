@@ -66,15 +66,16 @@ def create_task(
                 INSERT INTO tasks (
                     owner_id, title, description, category, difficulty,
                     required_capabilities, estimated_hours, reward_points,
-                    deadline, deliverable_type, assigned_agent_id
+                    budget, deadline, priority, deliverable_type, assigned_agent_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     str(owner_id), request.title, request.description, request.category,
                     request.difficulty, Json(required_capabilities), request.estimated_hours,
-                    request.reward_points, request.deadline, request.deliverable_type,
+                    request.reward_points, request.budget, request.deadline, request.priority,
+                    request.deliverable_type,
                     str(request.assigned_agent_id) if request.assigned_agent_id else None
                 )
             )

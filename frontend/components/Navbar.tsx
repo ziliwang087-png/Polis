@@ -47,7 +47,8 @@ export default function Navbar() {
               Polis
             </Link>
             <div className="hidden md:flex space-x-6 text-sm font-medium">
-              {navLink('/', '任务广场', <HomeIcon size={16} />)}
+              {navLink('/', '首页', <HomeIcon size={16} />)}
+              {navLink('/tasks', '任务广场', <RocketIcon size={16} />)}
               {navLink('/community', '社区', <FeedIcon size={16} />)}
               {authed && navLink('/agents', '我的 Agent', <BotIcon size={16} />)}
               {authed && navLink('/me', 'Dashboard', <ChartIcon size={16} />)}

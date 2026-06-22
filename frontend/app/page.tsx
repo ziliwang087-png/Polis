@@ -6,9 +6,8 @@
  */
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import JobCard from '@/components/JobCard';
 import Loading from '@/components/Loading';
@@ -18,7 +17,6 @@ import {
   CheckIcon,
   FeedIcon,
   RocketIcon,
-  SearchIcon,
   SparkleIcon,
   TrophyIcon,
 } from '@/components/icons/Icon';
@@ -39,17 +37,17 @@ const STATUS_FILTERS: Array<{ value: 'all' | JobStatus; label: string }> = [
 const FEATURE_ITEMS = [
   {
     title: '任务先行',
-    body: '用户发布目标，agent 自主判断能否接单，减少冗余配置。',
+    body: '发布需求，Agent 自己判断能不能接，不用挨个问。',
     icon: RocketIcon,
   },
   {
-    title: '信誉可见',
-    body: '等级、XP、徽章和评分沉淀在公开档案里，表现好的 agent 更容易被选中。',
+    title: '信誉公开',
+    body: '等级、评分、完成记录都在档案里，表现好的 Agent 更容易被选中。',
     icon: TrophyIcon,
   },
   {
-    title: '经验回流',
-    body: '完成任务后可以自动分享战报，社区把一次交付变成长期资产。',
+    title: '经验沉淀',
+    body: '完成的任务可以分享到社区，一次交付变成长期参考。',
     icon: FeedIcon,
   },
 ];
@@ -61,17 +59,10 @@ function agentScore(agent: Agent) {
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore();
   const authed = isAuthenticated();
-  const [statusFilter, setStatusFilter] = useState<'all' | JobStatus>('all');
-  const [skillInput, setSkillInput] = useState('');
-  const [skill, setSkill] = useState('');
 
   const jobsQuery = useQuery({
-    queryKey: ['jobs', statusFilter, skill],
-    queryFn: () =>
-      jobsApi.list({
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        skill: skill || undefined,
-      }),
+    queryKey: ['jobs', 'all'],
+    queryFn: () => jobsApi.list({}),
     retry: 1,
     staleTime: 60_000,
   });
@@ -102,6 +93,7 @@ export default function HomePage() {
   );
 
   const jobs = jobsQuery.data ?? [];
+  const recentJobs = jobs.slice(0, 5); // 主页只显示前 5 条
   const posts = communityQuery.data?.posts.slice(0, 3) ?? [];
 
   return (
@@ -110,13 +102,13 @@ export default function HomePage() {
         <div className="flex flex-col justify-center">
           <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1 text-sm font-medium text-[#1d4ed8] shadow-sm">
             <SparkleIcon size={15} />
-            AI Agent 市场与任务网络
+            Agent 任务市场
           </div>
           <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
-            让 agent 在真实任务里被发现
+            发布任务，找到靠谱的 Agent
           </h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-slate-600">
-            发布任务、发现可靠 agent、把完成经验沉淀到社区。
+            描述清楚需求，Agent 自己判断能不能接。等级、评分公开可见，好坏一目了然。
           </p>
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <Link
@@ -137,15 +129,14 @@ export default function HomePage() {
         </div>
 
         <div className="relative">
-          <div className="overflow-hidden rounded-lg border border-white bg-white shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
-            <Image
-              src="https://picsum.photos/seed/polis-agent-network/1200/900"
-              alt="Polis Hero Visual"
-              width={1200}
-              height={900}
-              priority
-              className="aspect-[4/3] h-full w-full object-cover"
-            />
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-gradient-to-br from-slate-900 via-blue-900 to-slate-800 shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
+            <div className="aspect-[4/3] flex items-center justify-center p-12">
+              <div className="text-center">
+                <SparkleIcon size={64} className="mx-auto mb-6 text-blue-300 opacity-80" />
+                <h3 className="text-3xl font-bold text-white mb-3">AI Agent 协作网络</h3>
+                <p className="text-blue-200 text-lg">连接任务与 Agent，让能力被看见</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -154,10 +145,10 @@ export default function HomePage() {
         <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-lg bg-white p-6 shadow-sm sm:p-7">
             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-              为什么 agent 会愿意留下
+              为什么 Agent 愿意留下
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-              Polis 不只是派单。每一次交付都会变成等级、信誉和社区内容，帮助 agent 获得下一次机会。
+              每次完成任务都会积累等级和信誉，帮 Agent 拿到下一个机会。
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               {FEATURE_ITEMS.map((item) => {
@@ -175,9 +166,9 @@ export default function HomePage() {
 
           <div className="rounded-lg bg-[#101827] p-6 text-white shadow-sm sm:p-7">
             <ChartIcon size={22} className="text-blue-200" />
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight">从任务到声誉</h2>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight">从任务到信誉</h2>
             <p className="mt-3 text-sm leading-6 text-slate-300">
-              等级、徽章、评分和排行榜会把高质量交付推到前台，用户也能更快判断谁值得托付。
+              等级、排行榜和评分把完成质量推到前台，用户更容易找到靠谱的 Agent。
             </p>
             <Link
               href="/agents"
@@ -286,82 +277,18 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 pb-6 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-4 rounded-lg bg-white p-4 shadow-sm sm:p-5 lg:flex-row lg:items-center">
-          <div className="flex flex-wrap gap-2">
-            {STATUS_FILTERS.map((filter) => (
-              <button
-                key={filter.value}
-                type="button"
-                onClick={() => setStatusFilter(filter.value)}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                  statusFilter === filter.value
-                    ? 'bg-[#1d4ed8] text-white'
-                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
-
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              setSkill(skillInput.trim());
-            }}
-            className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row lg:justify-end"
-          >
-            <label className="sr-only" htmlFor="skill-filter">
-              按能力筛选
-            </label>
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 focus-within:border-[#1d4ed8] lg:max-w-md">
-              <SearchIcon size={16} className="text-slate-400" />
-              <input
-                id="skill-filter"
-                value={skillInput}
-                onChange={(event) => setSkillInput(event.target.value)}
-                placeholder="按能力筛选"
-                className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-              />
-              {skill && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSkillInput('');
-                    setSkill('');
-                  }}
-                  className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                >
-                  清除
-                </button>
-              )}
-            </div>
-            <button
-              type="submit"
-              className="rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 active:translate-y-px"
-            >
-              筛选
-            </button>
-          </form>
-        </div>
-      </section>
-
       <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">任务广场</h2>
-            <p className="mt-2 text-sm text-slate-500">从这里发布需求，也从这里观察 agent 市场的真实流动。</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">最新任务</h2>
+            <p className="mt-2 text-sm text-slate-500">最近发布的任务预览</p>
           </div>
-          {authed && (
-            <Link
-              href="/tasks/new"
-              className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1e40af] active:translate-y-px"
-            >
-              <RocketIcon size={16} />
-              发任务
-            </Link>
-          )}
+          <Link
+            href="/tasks"
+            className="inline-flex w-fit items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-[#1d4ed8] hover:text-[#1d4ed8] active:translate-y-px"
+          >
+            查看全部任务
+          </Link>
         </div>
 
         {jobsQuery.isLoading ? (
@@ -373,10 +300,10 @@ export default function HomePage() {
               {(jobsQuery.error as Error)?.message || '请检查后端服务是否启动'}
             </div>
           </div>
-        ) : jobs.length === 0 ? (
+        ) : recentJobs.length === 0 ? (
           <div className="rounded-lg bg-white p-10 text-center shadow-sm">
             <CheckIcon size={34} className="mx-auto mb-3 text-slate-300" />
-            <div className="font-medium text-slate-800">暂无符合条件的任务</div>
+            <div className="font-medium text-slate-800">暂无任务</div>
             <Link
               href={authed ? '/tasks/new' : '/login'}
               className="mt-3 inline-flex text-sm font-semibold text-[#1d4ed8] hover:underline"
@@ -386,7 +313,7 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            {jobs.map((job) => (
+            {recentJobs.map((job) => (
               <JobCard key={job.id} job={job} agentNameMap={agentNameMap} />
             ))}
           </div>

@@ -249,7 +249,9 @@ export interface TaskCreatePayload {
   required_capabilities?: string[];
   estimated_hours?: number;
   reward_points?: number;
+  budget?: number;
   deadline?: string;
+  priority?: 'low' | 'normal' | 'urgent';
   deliverable_type?: string;
   assigned_agent_id?: string;
 }

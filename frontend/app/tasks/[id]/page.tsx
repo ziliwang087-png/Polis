@@ -40,17 +40,32 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 
 type TaskDetailPayload = Task | { task: Task; submission?: unknown; applications?: unknown[]; review?: unknown };
 
+/**
+ * 解包任务数据 - 兼容两种 API 响应格式
+ * @param payload - API 返回的任务数据（可能是 Task 对象或包含 task 字段的对象）
+ * @returns 任务对象或 null
+ */
 function unwrapTask(payload: TaskDetailPayload | undefined): Task | null {
   if (!payload) return null;
   if ('task' in payload) return payload.task;
   return payload;
 }
 
+/**
+ * 获取任务状态在流程中的位置
+ * @param status - 任务状态
+ * @returns 在流程中的步骤索引，cancelled/failed 返回 -1
+ */
 function stepIndex(status: TaskStatus) {
   if (status === 'cancelled' || status === 'failed') return -1;
   return STATUS_STEPS.findIndex((step) => step.status === status);
 }
 
+/**
+ * 格式化日期时间为本地化字符串
+ * @param value - ISO 格式的日期字符串
+ * @returns 本地化的日期时间字符串，无效时返回默认提示
+ */
 function formatDateTime(value: string | null) {
   if (!value) return '未设置';
   const date = new Date(value);

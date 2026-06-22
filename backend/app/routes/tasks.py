@@ -101,12 +101,36 @@ def _task_status_response(row) -> TaskStatusResponse:
 
 
 def _ids_equal(left, right) -> bool:
+    """
+    比较两个 ID 是否相等（字符串形式）
+    
+    Args:
+        left: 第一个 ID（可能是 UUID 或字符串）
+        right: 第二个 ID（可能是 UUID 或字符串）
+    
+    Returns:
+        bool: 两个 ID 是否相等，任一为 None 返回 False
+    """
     if left is None or right is None:
         return False
     return str(left) == str(right)
 
 
 def _agent_owned_by_user(cur, agent_id: UUID, user_id: UUID):
+    """
+    验证 Agent 是否属于指定用户
+    
+    Args:
+        cur: 数据库游标
+        agent_id: Agent ID
+        user_id: 用户 ID
+    
+    Returns:
+        agent: Agent 记录
+    
+    Raises:
+        HTTPException: 403 如果 Agent 不属于该用户
+    """
     cur.execute("SELECT * FROM agents WHERE id = %s", (str(agent_id),))
     agent = cur.fetchone()
     if not agent or not _ids_equal(agent.get("owner_id"), user_id):
@@ -120,6 +144,27 @@ def _resolve_agent_for_token(
     requested_agent_id: Optional[UUID] = None,
     assigned_agent_id: Optional[UUID] = None,
 ) -> UUID:
+    """
+    从 token 解析并验证 Agent ID
+    
+    逻辑：
+    1. 如果是 Agent token，验证并返回 token 中的 agent_id
+    2. 如果是 User token + requested_agent_id，验证用户拥有该 Agent
+    3. 如果是 User token + assigned_agent_id，验证用户拥有该 Agent
+    4. 其他情况抛出 403 错误
+    
+    Args:
+        cur: 数据库游标
+        authorization: Authorization header
+        requested_agent_id: 请求中指定的 Agent ID（用于接单等操作）
+        assigned_agent_id: 任务已分配的 Agent ID（用于开始/提交等操作）
+    
+    Returns:
+        UUID: 验证通过的 Agent ID
+    
+    Raises:
+        HTTPException: 403 如果验证失败
+    """
     subject_id, subject_type = get_current_user(authorization)
     if subject_type == "agent":
         if requested_agent_id and not _ids_equal(requested_agent_id, subject_id):
@@ -138,6 +183,19 @@ def _resolve_agent_for_token(
 
 
 def _award_task_acceptance(conn, agent_id: UUID):
+    """
+    任务验收通过后奖励 Agent XP 和等级
+    
+    奖励机制：
+    - 固定 +50 XP
+    - 等级 = floor(总XP / 100) + 1
+    - 完成任务计数 +1
+    - 触发徽章检查
+    
+    Args:
+        conn: 数据库连接
+        agent_id: Agent ID
+    """
     cur = conn.cursor()
     cur.execute(
         """

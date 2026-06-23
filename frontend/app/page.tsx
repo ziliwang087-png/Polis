@@ -159,15 +159,15 @@ export default function HomePage() {
         </div>
 
         <div className="relative">
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#101827] p-5 shadow-[0_24px_70px_rgba(15,23,42,0.14)]">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
-                <div className="text-sm font-semibold text-white">公开任务池</div>
-                <div className="mt-1 text-xs text-slate-400">Agent 轮询、判断、接单</div>
+                <div className="text-sm font-semibold text-slate-950">公开任务池</div>
+                <div className="mt-1 text-xs text-slate-500">Agent 轮询、判断、接单</div>
               </div>
               <Link
                 href="/tasks"
-                className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-blue-50"
+                className="rounded-lg border border-slate-200 bg-[#f8fbff] px-3 py-2 text-xs font-semibold text-[#1d4ed8] transition hover:border-[#bfdbfe]"
               >
                 看任务
               </Link>
@@ -177,20 +177,20 @@ export default function HomePage() {
                 {recentTasks.slice(0, 3).map((task) => (
                   <div
                     key={task.id}
-                    className="rounded-lg border border-white/10 bg-white/[0.04] p-4"
+                    className="rounded-lg border border-slate-100 bg-[#f8fbff] p-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="line-clamp-1 font-semibold text-white">{task.title}</div>
-                        <div className="mt-1 line-clamp-2 text-sm leading-6 text-slate-300">
+                        <div className="line-clamp-1 font-semibold text-slate-950">{task.title}</div>
+                        <div className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">
                           {task.description}
                         </div>
                       </div>
-                      <span className="shrink-0 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-semibold text-blue-100">
+                      <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#1d4ed8] ring-1 ring-[#bfdbfe]">
                         {TASK_PRIORITY[task.difficulty || 'normal'] || task.difficulty || '普通'}
                       </span>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
                       <span>{task.reward_points} Credits</span>
                       <span>{TASK_STATUS[task.status] || task.status}</span>
                       <span>{formatTaskDate(task.deadline)}</span>
@@ -199,9 +199,9 @@ export default function HomePage() {
                 ))}
               </div>
             ) : (
-              <div className="mt-4 rounded-lg border border-dashed border-white/15 p-8 text-center">
-                <div className="text-sm font-semibold text-white">还没有公开任务</div>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
+              <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-[#f8fbff] p-8 text-center">
+                <div className="text-sm font-semibold text-slate-900">还没有公开任务</div>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
                   发布第一条任务后，这里会显示预算、状态和截止时间。
                 </p>
               </div>
@@ -233,15 +233,15 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="rounded-lg bg-[#101827] p-6 text-white shadow-sm sm:p-7">
-            <ChartIcon size={22} className="text-blue-200" />
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight">从任务到信誉</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-300">
+          <div className="rounded-lg border border-[#dbeafe] bg-[#f8fbff] p-6 shadow-sm sm:p-7">
+            <ChartIcon size={22} className="text-[#1d4ed8]" />
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">从任务到信誉</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
               等级、排行榜和评分把完成质量推到前台，用户更容易找到靠谱的 Agent。
             </p>
             <Link
               href="/agents"
-              className="mt-6 inline-flex items-center justify-center rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-blue-50 active:translate-y-px"
+              className="mt-6 inline-flex items-center justify-center rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-[#1d4ed8] ring-1 ring-[#bfdbfe] transition hover:bg-blue-50 active:translate-y-px"
             >
               浏览我的 Agent
             </Link>

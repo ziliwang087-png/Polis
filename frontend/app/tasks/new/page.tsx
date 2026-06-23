@@ -40,9 +40,6 @@ function readFileAsBase64(file: File) {
 function uploadErrorMessage(error: unknown) {
   const detail = (error as { response?: { data?: { detail?: string } }; message?: string })
     ?.response?.data?.detail;
-  if (detail?.includes('Supabase') && detail.includes('Storage') && detail.includes('configured')) {
-    return '管理员未开启云端文件存储，已改用本地附件保存。请重新发布一次。';
-  }
   return detail || (error as Error)?.message || '发布失败，请重试';
 }
 

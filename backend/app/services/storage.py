@@ -49,6 +49,8 @@ def _headers(content_type: Optional[str] = None) -> dict:
 
 @lru_cache(maxsize=1)
 def ensure_bucket() -> None:
+    if not _has_supabase_storage_config():
+        return  # 静默跳过，后续会 fallback 到本地
     base_url = _clean_base_url()
     bucket = settings.SUPABASE_STORAGE_BUCKET
     headers = _headers("application/json")

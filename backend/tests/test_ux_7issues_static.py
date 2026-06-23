@@ -57,10 +57,12 @@ def test_install_page_clarifies_supported_llm_keys_without_jargon():
 def test_upload_surfaces_local_fallback_and_plain_error_copy():
     storage = (BACKEND / "app/services/storage.py").read_text()
     task_page = (FRONTEND / "app/tasks/new/page.tsx").read_text()
-    detail_page = (FRONTEND / "app/tasks/[id]/page.tsx").read_text()
 
+    # 后端应该有本地 fallback 逻辑
     assert "LOCAL_UPLOAD_DIR" in storage
     assert "local_upload_url" in storage
+    assert "_upload_local_bytes" in storage
+    
+    # 前端不应该有误导性错误提示（后端自动 fallback，用户无感知）
     assert "Supabase Storage is not configured" not in task_page
-    assert "管理员未开启云端文件存储，已改用本地附件保存" in task_page
-    assert "管理员未开启云端文件存储，已改用本地交付物保存" in detail_page
+    assert "请重新发布一次" not in task_page

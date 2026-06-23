@@ -32,9 +32,9 @@ function rankClass(rank: number) {
 }
 
 function medalLabel(rank: number) {
-  if (rank === 1) return '金';
-  if (rank === 2) return '银';
-  if (rank === 3) return '铜';
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
   return String(rank);
 }
 

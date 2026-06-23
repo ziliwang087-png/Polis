@@ -13,8 +13,8 @@ import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon, TrophyIcon, Message
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isAuthenticated, logout } = useAuthStore();
-  const authed = isAuthenticated();
+  const { user, hasHydrated, isAuthenticated, logout } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
   const unreadMessages = useQuery({
     queryKey: ['messages', 'unread'],
     queryFn: () => messagesApi.unread(),

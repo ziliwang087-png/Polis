@@ -7,6 +7,7 @@ import os
 import sys
 import types
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -187,3 +188,94 @@ def test_owner_can_delete_deliverable(monkeypatch):
 
     assert result == {"deleted": True}
     assert deliverable_id not in store["deliverables"]
+
+
+def test_storage_falls_back_to_local_upload_when_supabase_is_missing(monkeypatch, tmp_path):
+    os.environ.setdefault("PUBLIC_BASE_URL", "http://testserver")
+    import app.services.storage as storage
+
+    monkeypatch.setattr(storage.settings, "SUPABASE_URL", None)
+    monkeypatch.setattr(storage.settings, "SUPABASE_SERVICE_ROLE_KEY", None)
+    monkeypatch.setattr(storage.settings, "SUPABASE_ANON_KEY", None)
+    monkeypatch.setattr(storage.settings, "LOCAL_UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(storage.settings, "PUBLIC_BASE_URL", "https://api.example.com")
+
+    url = storage.upload_bytes(
+        data=b"demo",
+        filename="my brief.txt",
+        content_type="text/plain",
+        owner_id=uuid4(),
+        bucket="task-deliverables",
+        path_prefix="task-123",
+    )
+
+    assert url.startswith("https://api.example.com/api/v1/uploads/task-deliverables/task-123/")
+    assert url.endswith("-my-brief.txt")
+    stored_path = Path(tmp_path) / "task-deliverables" / "task-123" / url.rsplit("/", 1)[-1]
+    assert stored_path.read_bytes() == b"demo"
+
+
+def test_storage_falls_back_to_local_upload_when_supabase_request_fails(monkeypatch, tmp_path):
+    import httpx
+    import app.services.storage as storage
+
+    monkeypatch.setattr(storage.settings, "SUPABASE_URL", "https://supabase.example")
+    monkeypatch.setattr(storage.settings, "SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setattr(storage.settings, "SUPABASE_ANON_KEY", None)
+    monkeypatch.setattr(storage.settings, "LOCAL_UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(storage.settings, "PUBLIC_BASE_URL", "https://api.example.com")
+
+    def fail_post(*args, **kwargs):
+        raise httpx.ConnectError("bucket unavailable")
+
+    monkeypatch.setattr(storage.httpx, "post", fail_post)
+
+    url = storage.upload_bytes(
+        data=b"deliverable",
+        filename="result.md",
+        content_type="text/markdown",
+        owner_id=uuid4(),
+        bucket="task-deliverables",
+        path_prefix="task-456",
+    )
+
+    assert url.startswith("https://api.example.com/api/v1/uploads/task-deliverables/task-456/")
+    stored_path = Path(tmp_path) / "task-deliverables" / "task-456" / url.rsplit("/", 1)[-1]
+    assert stored_path.read_bytes() == b"deliverable"
+
+
+def test_app_creates_local_upload_directory_before_static_mount(monkeypatch, tmp_path):
+    from fastapi import APIRouter
+    import app.config as config
+
+    upload_dir = tmp_path / "missing-uploads"
+    monkeypatch.setattr(config.settings, "LOCAL_UPLOAD_DIR", str(upload_dir))
+    fake_database = types.ModuleType("app.database")
+    fake_database.get_db_connection = lambda: None
+    monkeypatch.setitem(sys.modules, "app.database", fake_database)
+
+    routes_pkg = types.ModuleType("app.routes")
+    route_names = [
+        "auth",
+        "agents",
+        "jobs",
+        "tasks",
+        "admin",
+        "notifications",
+        "gamification",
+        "community",
+        "leaderboard",
+        "task_deliverables",
+        "messages",
+    ]
+    for name in route_names:
+        module = types.ModuleType(f"app.routes.{name}")
+        module.router = APIRouter()
+        setattr(routes_pkg, name, module)
+        monkeypatch.setitem(sys.modules, f"app.routes.{name}", module)
+    monkeypatch.setitem(sys.modules, "app.routes", routes_pkg)
+    sys.modules.pop("app.main", None)
+
+    importlib.import_module("app.main")
+
+    assert upload_dir.is_dir()

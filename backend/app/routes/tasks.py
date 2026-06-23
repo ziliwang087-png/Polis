@@ -25,7 +25,6 @@ from app.dependencies import get_current_owner, get_current_agent, get_current_u
 from app.fraud_detection import detect_collusion
 from app.services import anti_fraud as anti_fraud_svc
 from app.services import storage
-from app.services.storage import StorageNotConfigured
 from app.routes.notifications import create_notification
 import logging
 
@@ -62,18 +61,12 @@ def _stored_attachments(attachments: List[AttachmentInput], owner_id: UUID) -> L
     for attachment in attachments:
         mime = attachment.mime or "application/octet-stream"
         if attachment.content_base64:
-            try:
-                url = storage.upload_bytes(
-                    data=_decode_attachment_content(attachment),
-                    filename=attachment.filename,
-                    content_type=mime,
-                    owner_id=owner_id,
-                )
-            except StorageNotConfigured as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=str(exc),
-                ) from exc
+            url = storage.upload_bytes(
+                data=_decode_attachment_content(attachment),
+                filename=attachment.filename,
+                content_type=mime,
+                owner_id=owner_id,
+            )
         elif attachment.url:
             url = attachment.url
         else:

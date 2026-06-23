@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '@/lib/api/tasks';
 import { useAuthStore } from '@/lib/store';
+import Loading from '@/components/Loading';
 import { CheckIcon, RocketIcon } from '@/components/icons/Icon';
 
 function formatFileSize(bytes: number) {
@@ -36,10 +37,19 @@ function readFileAsBase64(file: File) {
   });
 }
 
+function uploadErrorMessage(error: unknown) {
+  const detail = (error as { response?: { data?: { detail?: string } }; message?: string })
+    ?.response?.data?.detail;
+  if (detail?.includes('Supabase') && detail.includes('Storage') && detail.includes('configured')) {
+    return '管理员未开启云端文件存储，已改用本地附件保存。请重新发布一次。';
+  }
+  return detail || (error as Error)?.message || '发布失败，请重试';
+}
+
 export default function NewTaskPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isAuthenticated } = useAuthStore();
+  const { hasHydrated, isAuthenticated } = useAuthStore();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [budget, setBudget] = useState('');
@@ -88,6 +98,10 @@ export default function NewTaskPage() {
   const removeSelectedFile = (indexToRemove: number) => {
     setSelectedFiles((files) => files.filter((_, index) => index !== indexToRemove));
   };
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!isAuthenticated()) {
     return (
@@ -267,8 +281,7 @@ export default function NewTaskPage() {
 
           {createMutation.isError && (
             <div className="text-sm text-red-600 bg-red-50 rounded-xl p-3">
-              {(createMutation.error as { response?: { data?: { detail?: string } } })
-                ?.response?.data?.detail || '发布失败，请重试'}
+              {uploadErrorMessage(createMutation.error)}
             </div>
           )}
 

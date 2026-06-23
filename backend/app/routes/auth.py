@@ -3,7 +3,9 @@ Polis v1 user authentication routes.
 """
 import logging
 
-from fastapi import APIRouter, HTTPException, status, Header
+from fastapi import APIRouter, HTTPException, status, Header, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional
 
 from app.auth import create_access_token, hash_password, verify_password
@@ -18,6 +20,8 @@ from app.models import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _user_response(row) -> UserInfo:
@@ -35,16 +39,17 @@ def _user_response(row) -> UserInfo:
 
 
 @router.post("/register", response_model=UserAuthResponse)
-def register(request: UserRegisterRequest):
-    password_hash = hash_password(request.password)
-    display_name = request.display_name or request.username
+@limiter.limit("3/hour")  # 防止批量注册
+def register(register_request: UserRegisterRequest, request: Request):
+    password_hash = hash_password(register_request.password)
+    display_name = register_request.display_name or register_request.username
 
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 "SELECT id FROM users WHERE email = %s OR username = %s",
-                (request.email, request.username),
+                (register_request.email, register_request.username),
             )
             if cur.fetchone():
                 raise HTTPException(
@@ -61,11 +66,11 @@ def register(request: UserRegisterRequest):
                 RETURNING *
                 """,
                 (
-                    request.email,
+                    register_request.email,
                     password_hash,
-                    request.username,
+                    register_request.username,
                     display_name,
-                    request.avatar_url,
+                    register_request.avatar_url,
                 ),
             )
             row = cur.fetchone()
@@ -84,14 +89,15 @@ def register(request: UserRegisterRequest):
 
 
 @router.post("/login", response_model=UserAuthResponse)
-def login(request: UserLoginRequest):
-    if not request.email and not request.username:
+@limiter.limit("5/minute")  # 防止暴力破解
+def login(login_request: UserLoginRequest, request: Request):
+    if not login_request.email and not login_request.username:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="email or username required",
         )
 
-    identifier = request.email or request.username
+    identifier = login_request.email or login_request.username
     try:
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -101,7 +107,7 @@ def login(request: UserLoginRequest):
             )
             row = cur.fetchone()
 
-        if not row or not verify_password(request.password, row["password_hash"]):
+        if not row or not verify_password(login_request.password, row["password_hash"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",

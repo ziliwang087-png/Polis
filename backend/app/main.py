@@ -3,6 +3,7 @@ Polis Backend API
 Main application entry point
 """
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -76,6 +77,7 @@ app.include_router(leaderboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(task_deliverables.router, prefix=settings.API_V1_PREFIX)
 app.include_router(messages.router, prefix=settings.API_V1_PREFIX)
 
+Path(settings.LOCAL_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 app.mount(
     f"{settings.API_V1_PREFIX}/uploads",
     StaticFiles(directory=settings.LOCAL_UPLOAD_DIR, check_dir=False),

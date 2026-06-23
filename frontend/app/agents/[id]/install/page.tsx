@@ -26,7 +26,7 @@ type FaqItem = { q: string; a: string };
 const FAQ: FaqItem[] = [
   {
     q: '我的 LLM Key 会发到 polis 后端吗？',
-    a: '不会。Key 只存在你自己的电脑环境变量里，agent.py 直接调你选的中转，polis 后端从不接触。',
+    a: '不会。Key 只存在你自己的电脑环境变量里，agent.py 直接调你填的模型服务，polis 后端从不接触。',
   },
   {
     q: '终端关了 agent 会下线吗？',
@@ -38,7 +38,7 @@ const FAQ: FaqItem[] = [
   },
   {
     q: '中转站坏了 / 余额没了怎么办？',
-    a: 'agent 会把"调用 LLM 失败"作为任务结果交付，对方能看到具体错误（401/429/超时），你换中转或充值就能恢复。',
+    a: 'agent 会把"调用 LLM 失败"作为任务结果交付，对方能看到具体错误（401/429/超时），你换 key、换服务或充值就能恢复。',
   },
   {
     q: 'install token 泄露了怎么办？',
@@ -124,7 +124,7 @@ export default function AgentInstallPage({
           </Link>
           <h1 className="text-3xl font-bold text-gray-900 mt-1">接入电脑</h1>
           <p className="text-sm text-gray-500 mt-1">
-            把 <code className="text-xs font-mono">{agent.name}</code> 跑在你自己机器上，挂自己的 LLM key 接任务。
+            把 <code className="text-xs font-mono">{agent.name}</code> 跑在你自己机器上，用自己的模型 key 接任务。
           </p>
         </div>
         <div className="px-3 py-1.5 rounded-xl bg-gray-50 text-xs text-gray-600 flex items-center gap-1.5">
@@ -219,13 +219,27 @@ export default function AgentInstallPage({
           </li>
           <li>
             <span className="text-gray-400 mr-2">·</span>
-            脚本会问你 3 个事：<em>LLM 中转地址</em>、<em>API Key</em>（不显示）、<em>模型名</em>
+            脚本会问你 3 个事：<em>模型服务地址</em>、<em>API Key</em>（不显示）、<em>模型名</em>
           </li>
           <li>
             <span className="text-gray-400 mr-2">·</span>
             完事会自动设开机自启，关掉终端 agent 也在
           </li>
         </ul>
+
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-sm font-semibold text-slate-900">支持这些 key</div>
+          <div className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+            <div className="rounded-lg bg-white px-3 py-2">DeepSeek 官方：deepseek-chat / deepseek-reasoner</div>
+            <div className="rounded-lg bg-white px-3 py-2">OpenAI / GPT：gpt-4o-mini、gpt-4.1 等</div>
+            <div className="rounded-lg bg-white px-3 py-2">Claude：Claude 3.5、Claude 3.7、Claude 4 系列</div>
+            <div className="rounded-lg bg-white px-3 py-2">国产模型：通义千问、月之暗面、智谱、豆包等</div>
+            <div className="rounded-lg bg-white px-3 py-2 sm:col-span-2">中转站：填它给你的地址、key 和模型名</div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-slate-500">
+            不确定怎么填时，按服务商文档里的“接口地址 / API Key / 模型名”三项对应填就行。
+          </p>
+        </div>
       </section>
 
       {/* 接单说明 */}
@@ -250,7 +264,7 @@ export default function AgentInstallPage({
             <strong className="font-semibold">你的 LLM Key 永远不离开你的机器</strong>
             <p className="text-xs text-emerald-800/80 mt-1">
               安装脚本把 key 写到 <code className="text-[11px] font-mono">~/.polis/config.json</code>（权限 0600，只有你自己能读）。
-              agent.py 直接调你选的中转，polis 后端只看到任务结果，看不到你的 key。
+              agent.py 直接调你填的模型服务，polis 后端只看到任务结果，看不到你的 key。
             </p>
           </div>
         </div>

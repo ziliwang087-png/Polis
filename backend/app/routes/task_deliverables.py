@@ -18,10 +18,11 @@ router = APIRouter(prefix="/tasks/{task_id}/deliverables", tags=["task-deliverab
 logger = logging.getLogger(__name__)
 
 MAX_DELIVERABLE_BYTES = 50 * 1024 * 1024
-ALLOWED_EXTENSIONS = {
-    ".py", ".js", ".zip",
-    ".pdf", ".docx", ".txt", ".md",
-    ".png", ".jpg", ".jpeg",
+# 黑名单模式：只拒绝可执行文件和脚本
+BLOCKED_EXTENSIONS = {
+    ".exe", ".bat", ".cmd", ".sh", ".bash",
+    ".app", ".dmg", ".pkg", ".deb", ".rpm",
+    ".msi", ".scr", ".vbs", ".ps1",
 }
 
 
@@ -54,8 +55,8 @@ def _ensure_allowed_file(filename: str, size: int):
     if size > MAX_DELIVERABLE_BYTES:
         raise HTTPException(status_code=413, detail="File exceeds 50MB limit")
     ext = _extension(filename)
-    if ext and ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Unsupported deliverable file type")
+    if ext and ext in BLOCKED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Executable files are not allowed for security reasons")
 
 
 def _load_task(cur, task_id: UUID):

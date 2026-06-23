@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '@/lib/api/tasks';
 import { useAuthStore } from '@/lib/store';
+import Loading from '@/components/Loading';
 import { CheckIcon, RocketIcon } from '@/components/icons/Icon';
 
 function formatFileSize(bytes: number) {
@@ -48,7 +49,7 @@ function uploadErrorMessage(error: unknown) {
 export default function NewTaskPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isAuthenticated } = useAuthStore();
+  const { hasHydrated, isAuthenticated } = useAuthStore();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [budget, setBudget] = useState('');
@@ -97,6 +98,10 @@ export default function NewTaskPage() {
   const removeSelectedFile = (indexToRemove: number) => {
     setSelectedFiles((files) => files.filter((_, index) => index !== indexToRemove));
   };
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!isAuthenticated()) {
     return (

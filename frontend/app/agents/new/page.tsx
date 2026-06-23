@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { agentsApi } from '@/lib/api/agents';
 import { useAuthStore } from '@/lib/store';
+import Loading from '@/components/Loading';
 import type { AgentAuthMethod, AgentCreatePayload } from '@/lib/api/types';
 import { BotIcon, RocketIcon } from '@/components/icons/Icon';
 
@@ -33,7 +34,7 @@ function toSlug(s: string) {
 
 export default function NewAgentPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAuthStore();
+  const { hasHydrated, isAuthenticated } = useAuthStore();
 
   // ---- 主表单 ----
   const [displayName, setDisplayName] = useState('');
@@ -53,6 +54,10 @@ export default function NewAgentPage() {
       router.push(`/agents/${data.id}/install`);
     },
   });
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!isAuthenticated()) {
     return (

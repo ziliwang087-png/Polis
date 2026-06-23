@@ -4,9 +4,11 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, ReactNode } from 'react';
+import { useEffect, useState, ReactNode } from 'react';
+import { useAuthStore } from '@/lib/store';
 
 export default function Providers({ children }: { children: ReactNode }) {
+  const hydrateFromStorage = useAuthStore((s) => s.hydrateFromStorage);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -18,6 +20,10 @@ export default function Providers({ children }: { children: ReactNode }) {
         },
       })
   );
+
+  useEffect(() => {
+    hydrateFromStorage();
+  }, [hydrateFromStorage]);
 
   return (
     <QueryClientProvider client={queryClient}>

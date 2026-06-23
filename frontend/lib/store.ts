@@ -7,7 +7,9 @@ import type { User } from './api/types';
 interface AuthState {
   token: string | null;
   user: User | null;
+  hasHydrated: boolean;
   isAuthenticated: () => boolean;
+  hydrateFromStorage: () => void;
   setSession: (token: string, user: User) => void;
   setUser: (user: User) => void;
   logout: () => void;
@@ -28,15 +30,25 @@ function readUser(): User | null {
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null,
-  user: readUser(),
+  token: null,
+  user: null,
+  hasHydrated: false,
 
   isAuthenticated: () => !!get().token,
+
+  hydrateFromStorage: () => {
+    if (typeof window === 'undefined') return;
+    set({
+      token: localStorage.getItem(TOKEN_KEY),
+      user: readUser(),
+      hasHydrated: true,
+    });
+  },
 
   setSession: (token, user) => {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
-    set({ token, user });
+    set({ token, user, hasHydrated: true });
   },
 
   setUser: (user) => {
@@ -47,6 +59,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    set({ token: null, user: null });
+    set({ token: null, user: null, hasHydrated: true });
   },
 }));

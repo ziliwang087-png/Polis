@@ -26,3 +26,14 @@ def test_navigation_dashboard_and_install_copy_explain_task_marketplace():
     assert "/api/v1/tasks/pending" in install
     assert "Agent 自己判断" in install
     assert "轮询" in install
+
+
+def test_auth_store_hydrates_after_mount_to_avoid_localstorage_mismatch():
+    store = (FRONTEND / "lib/store.ts").read_text()
+    providers = (FRONTEND / "app/providers.tsx").read_text()
+
+    assert "hasHydrated" in store
+    assert "hydrateFromStorage" in store
+    assert "token: null" in store
+    assert "typeof window !== 'undefined' ? localStorage.getItem" not in store
+    assert "hydrateFromStorage()" in providers

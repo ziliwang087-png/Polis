@@ -52,13 +52,14 @@ export default function AgentInstallPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { isAuthenticated } = useAuthStore();
+  const { hasHydrated, isAuthenticated } = useAuthStore();
   const [copied, setCopied] = useState(false);
+  const authed = hasHydrated && isAuthenticated();
 
   const agentQuery = useQuery({
     queryKey: ['agents', id],
     queryFn: () => agentsApi.get(id),
-    enabled: isAuthenticated(),
+    enabled: authed,
     staleTime: 60_000,
   });
 
@@ -77,6 +78,10 @@ export default function AgentInstallPage({
       alert('复制失败，请手动选中下方命令复制。');
     }
   };
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!isAuthenticated()) {
     return (

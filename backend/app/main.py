@@ -5,6 +5,7 @@ Main application entry point
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import logging
 import time
 
@@ -74,6 +75,12 @@ app.include_router(community.router, prefix=settings.API_V1_PREFIX)
 app.include_router(leaderboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(task_deliverables.router, prefix=settings.API_V1_PREFIX)
 app.include_router(messages.router, prefix=settings.API_V1_PREFIX)
+
+app.mount(
+    f"{settings.API_V1_PREFIX}/uploads",
+    StaticFiles(directory=settings.LOCAL_UPLOAD_DIR, check_dir=False),
+    name="local-uploads",
+)
 
 @app.get("/")
 def root():

@@ -73,6 +73,15 @@ function formatDateTime(value: string | null) {
   return date.toLocaleString('zh-CN');
 }
 
+function deliverableUploadMessage(error: unknown) {
+  const err = error as { message?: string; response?: { data?: { detail?: string } } };
+  const detail = err?.response?.data?.detail;
+  if (detail?.includes('Supabase') && detail.includes('Storage') && detail.includes('configured')) {
+    return '管理员未开启云端文件存储，已改用本地交付物保存。请重新上传一次。';
+  }
+  return detail || err?.message || '上传失败';
+}
+
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -183,8 +192,7 @@ export default function TaskDetailPage() {
     },
     onError: (error: unknown) => {
       console.error('Upload deliverable failed:', error);
-      const err = error as { message?: string; response?: { data?: { detail?: string } } };
-      toast.error(err?.message || err?.response?.data?.detail || '上传失败');
+      toast.error(deliverableUploadMessage(error));
     },
   });
 
@@ -460,7 +468,9 @@ export default function TaskDetailPage() {
                 />
               </label>
               {uploadDeliverable.isError && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">上传失败，请确认权限和文件大小。</div>
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
+                  {deliverableUploadMessage(uploadDeliverable.error)}
+                </div>
               )}
               <ActionButton pending={uploadDeliverable.isPending} disabled={!deliverableFile} onClick={() => uploadDeliverable.mutate()}>
                 上传交付物

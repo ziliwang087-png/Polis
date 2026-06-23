@@ -29,7 +29,6 @@ from app.models import (
     JobResponse,
 )
 from app.services import storage
-from app.services.storage import StorageNotConfigured
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
@@ -85,18 +84,12 @@ def _stored_attachments(attachments: List[AttachmentInput], owner_id: UUID) -> L
     for attachment in attachments:
         mime = attachment.mime or "application/octet-stream"
         if attachment.content_base64:
-            try:
-                url = storage.upload_bytes(
-                    data=_decode_attachment_content(attachment),
-                    filename=attachment.filename,
-                    content_type=mime,
-                    owner_id=owner_id,
-                )
-            except StorageNotConfigured as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=str(exc),
-                ) from exc
+            url = storage.upload_bytes(
+                data=_decode_attachment_content(attachment),
+                filename=attachment.filename,
+                content_type=mime,
+                owner_id=owner_id,
+            )
         elif attachment.url:
             url = attachment.url
         else:
@@ -121,22 +114,18 @@ def _artifact_file_url(request: JobArtifactRequest, owner_id: UUID) -> Optional[
                 detail="filename is required when content_base64 is provided",
             )
         try:
-            return storage.upload_bytes(
-                data=base64.b64decode(request.content_base64, validate=True),
-                filename=request.filename,
-                content_type=request.mime or "application/octet-stream",
-                owner_id=owner_id,
-            )
-        except StorageNotConfigured as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ) from exc
+            data = base64.b64decode(request.content_base64, validate=True)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid base64 artifact",
             ) from exc
+        return storage.upload_bytes(
+            data=data,
+            filename=request.filename,
+            content_type=request.mime or "application/octet-stream",
+            owner_id=owner_id,
+        )
     return request.file_url
 
 

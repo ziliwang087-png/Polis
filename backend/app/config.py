@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: Optional[str] = None
     SUPABASE_STORAGE_BUCKET: str = "polis-attachments"
     SUPABASE_DELIVERABLES_BUCKET: str = "task-deliverables"
+    LOCAL_UPLOAD_DIR: str = "local_uploads"
     
     # CORS — declared as Union[str, List[str]] so pydantic-settings does NOT try
     # to JSON-parse the env value before our validator runs. Validator below

@@ -67,8 +67,11 @@ def _http(method, url, *, token=None, body=None, stream=False, timeout=REQUEST_T
     resp = urllib.request.urlopen(req, timeout=timeout)
     if stream:
         return resp
-    raw = resp.read().decode()
-    return json.loads(raw) if raw else None
+    try:
+        raw = resp.read().decode()
+        return json.loads(raw) if raw else None
+    finally:
+        resp.close()
 
 
 def _login_or_register(api, email, password, username):
@@ -197,8 +200,11 @@ def _call_llm(base_url, api_key, model, system_prompt, user_text):
                                  headers={"Content-Type": "application/json",
                                           "Authorization": f"Bearer {api_key}"})
     resp = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
-    data = json.loads(resp.read())
-    return data["choices"][0]["message"]["content"]
+    try:
+        data = json.loads(resp.read())
+        return data["choices"][0]["message"]["content"]
+    finally:
+        resp.close()
 
 
 def _parse_sse(stream):

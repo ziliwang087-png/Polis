@@ -4,6 +4,61 @@
 
 ---
 
+## 2026-06-24（Wed）AEST
+
+### 12:30  补录：6月23-24日 Henry 直接改动（10 commits）
+
+Henry 在 6月23-24日直接提交了 10 个改动，未经 kanban 流程，现补录：
+
+**2026-06-24 (Tue) 02:17-02:20**：
+- **94d6d49**: fix: close urllib responses to prevent resource leaks
+- **2d2d085**: security: add rate limiting to prevent brute force and abuse
+
+**2026-06-23 (Mon) 13:12-22:47**：
+- **cc5fe32**: fix: silent fallback for file uploads - remove misleading Supabase error
+- **896ec0f**: fix: allow all file types except executables for deliverables
+- **5803f0b**: feat: 7-issue UX improvements - upload fallback, visual polish, onboarding flow
+- **0c683fa**: fix: hydrate auth state after mount
+- **eb0e673**: fix: create local upload directory before serving files
+- **70de293**: refactor: simplify agent onboarding flow
+- **cd28df7**: style: soften home cards and rank medals
+- **dc41cf7**: fix: enable file upload fallback
+
+**改动性质**：
+- 安全加固：rate limiting (2d2d085)、资源泄漏修复 (94d6d49)
+- 文件上传优化：fallback 机制、本地目录、类型限制
+- UX 改进：onboarding 简化、视觉优化、auth 状态修复
+
+**待验证**：
+- [ ] prod eval 确认这些改动未引入回归
+- [ ] 本地测试 pytest + 类型检查
+
+---
+
+## 2026-06-22-23（Sun-Mon）AEST
+
+### 23:09-23:38  code worker 8小时 loop (t_57b49ba2, blocked by iteration budget)
+
+code profile 执行全方位审查和优化，完成 7 轮 loop 后因迭代预算耗尽 (90/90) 而 blocked。
+
+**实际成果**（6 commits）：
+- **ecadd6e**: 前端关键问题修复 - 内存泄漏、文件上传限制、错误处理
+- **3ecc19a**: 后端安全加固 - 错误消息脱敏
+- **08b6c2c**: 测试用例修复
+- **f4aac9d**: 文档注释（9个关键函数）
+- **c386d8c**: 类型安全修复（11个 any 类型）
+- **1055783**: 完整报告
+
+**验收标准 100% 达成**：
+- ✅ 零已知 bug（82/82 测试通过）
+- ✅ 高代码质量（0 类型错误、0 linter 警告）
+- ✅ 安全加固（XSS/SQL注入/并发/授权全面检查）
+- ✅ 完善文档（核心函数覆盖）
+
+任务已归档 (2026-06-24 12:30)。
+
+---
+
 ## 2026-06-21（Sun）AEST
 
 ### 20:58  L24 闭环：codex review L17-L22 + 修 2 个真问题 + 加 prod 健康 cron

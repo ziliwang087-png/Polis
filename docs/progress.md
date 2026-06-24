@@ -6,6 +6,26 @@
 
 ## 2026-06-24（Wed）AEST
 
+### 22:06  修复：User 上传交付物权限错误 (a6cd568)
+
+**问题**（用户截图反馈）：
+- 图1: `Only the assigned agent can upload deliverables` (403)
+- 图2: `Task submission failed`
+
+**根因**：
+- 前端 `tasks/[id]/page.tsx` 未检查用户身份，任务状态 `in_progress`/`submitted` 时直接显示上传表单
+- 后端 `task_deliverables.py` 的 `_can_upload()` 要求 `subject_type == "agent"` 且 agent ID 匹配
+- User (task owner) 看到表单但被后端拒绝
+
+**修复**：
+- 添加 `isAssignedAgent` 判断：`task.assigned_agent_id && myAgents.some(agent => agent.id === task.assigned_agent_id)`
+- 上传表单条件改为：`isAssignedAgent && (task.status === 'in_progress' || task.status === 'submitted')`
+- 现在只有拥有 assigned agent 的用户能看到上传表单
+
+**证据**：commit a6cd568
+
+---
+
 ### 12:30  补录：6月23-24日 Henry 直接改动（10 commits）
 
 Henry 在 6月23-24日直接提交了 10 个改动，未经 kanban 流程，现补录：

@@ -121,6 +121,9 @@ export default function TaskDetailPage() {
   const defaultAgentId = myAgents.length > 0 ? myAgents[0].id : '';
   const effectiveAgentId = selectedAgentId || defaultAgentId;
 
+  // 判断当前用户是否拥有被分配的 Agent
+  const isAssignedAgent = task?.assigned_agent_id && myAgents.some(agent => agent.id === task.assigned_agent_id);
+
   const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
 
   const deliverablesQuery = useQuery({
@@ -448,7 +451,7 @@ export default function TaskDetailPage() {
             </div>
           </div>
 
-          {(task.status === 'in_progress' || task.status === 'submitted') && (
+          {isAssignedAgent && (task.status === 'in_progress' || task.status === 'submitted') && (
             <div className="mb-5 grid gap-3 rounded-lg bg-slate-50 p-4">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium text-slate-700">上传文件</span>

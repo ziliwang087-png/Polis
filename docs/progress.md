@@ -32,6 +32,13 @@ verify_byoa_agent_smoke.py: 6/6 PASS
 verify_agent_card_skills.py --api prod: PASS
 verify_frontend_smoke.py --base prod frontend: PASS - 8 routes clean
 local run_eval_suite.py --local: 3/5 PASS; health/deep passed, admin local verifiers timed out after first 200 response
+commit: 32a7236 fix(tasks): allow task owner to rate completed tasks
+git push origin main: d9566a7..32a7236
+Railway deploy 67368827-1f4c-4c91-8fce-2ed3cb1488ae: SUCCESS
+prod /health/deep after deploy: status=ok
+prod task rating regression: PASS task_id=e0bf2aae-297d-472c-a784-ecd03bf7cc1a rating_id=f039300d-8c02-4062-8a05-7234fcf6d7ff xp_gained=100
+verify_rating_flow.py --api prod: PASS
+verify_frontend_smoke.py --base prod frontend after deploy: PASS - 8 routes clean
 ```
 
 **备注**：

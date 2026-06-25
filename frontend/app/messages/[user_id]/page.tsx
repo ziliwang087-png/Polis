@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast, { Toaster } from 'react-hot-toast';
 import { messagesApi } from '@/lib/api/messages';
 import { useAuthStore } from '@/lib/store';
+import Loading from '@/components/Loading';
 
 function formatTime(value: string) {
   const date = new Date(value);
@@ -18,8 +19,8 @@ export default function MessageThreadPage() {
   const params = useParams();
   const userId = params.user_id as string;
   const queryClient = useQueryClient();
-  const { user, isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const { user, isAuthenticated, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
   const [draft, setDraft] = useState('');
 
   const threadQuery = useQuery({
@@ -68,6 +69,10 @@ export default function MessageThreadPage() {
       cancelled = true;
     };
   }, [queryClient, threadQuery.data, user?.id]);
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!authed) {
     return (

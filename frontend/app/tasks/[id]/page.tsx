@@ -86,8 +86,8 @@ export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user, isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const { user, isAuthenticated, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
   const taskId = params.id as string;
 
   const [rating, setRating] = useState(0);

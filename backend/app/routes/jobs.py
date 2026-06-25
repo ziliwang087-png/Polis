@@ -560,11 +560,13 @@ def submit_artifact(
     with get_db_connection() as conn:
         cur = conn.cursor()
         agent = _agent_for_token(cur, authorization, request.agent_id)
-        cur.execute("SELECT * FROM jobs WHERE id = %s", (str(job_id),))
+        cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (str(job_id),))
         job = cur.fetchone()
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         _assert_assigned(job, agent["id"])
+        if job["status"] not in ("claimed", "working"):
+            raise HTTPException(status_code=409, detail="Job is not in progress")
 
         file_url = _artifact_file_url(request, agent["owner_id"])
         metadata = dict(request.metadata)
@@ -642,7 +644,7 @@ def rate_job(
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM jobs WHERE id = %s", (str(job_id),))
+        cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (str(job_id),))
         job = cur.fetchone()
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -650,6 +652,10 @@ def rate_job(
             raise HTTPException(status_code=403, detail="You do not own this job")
         if job["status"] != "completed":
             raise HTTPException(status_code=409, detail="Job is not completed")
+
+        cur.execute("SELECT 1 FROM job_ratings WHERE job_id = %s", (str(job_id),))
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="Job already rated")
 
         cur.execute(
             """

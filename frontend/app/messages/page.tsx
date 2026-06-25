@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { messagesApi } from '@/lib/api/messages';
 import { useAuthStore } from '@/lib/store';
+import Loading from '@/components/Loading';
 import { MessageIcon } from '@/components/icons/Icon';
 
 function formatTime(value: string) {
@@ -13,8 +14,8 @@ function formatTime(value: string) {
 }
 
 export default function MessagesPage() {
-  const { isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const { isAuthenticated, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
 
   const conversationsQuery = useQuery({
     queryKey: ['messages', 'conversations'],
@@ -22,6 +23,10 @@ export default function MessagesPage() {
     enabled: authed,
     staleTime: 30_000,
   });
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!authed) {
     return (

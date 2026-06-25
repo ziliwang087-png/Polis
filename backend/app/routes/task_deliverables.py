@@ -23,6 +23,8 @@ BLOCKED_EXTENSIONS = {
     ".exe", ".bat", ".cmd", ".sh", ".bash",
     ".app", ".dmg", ".pkg", ".deb", ".rpm",
     ".msi", ".scr", ".vbs", ".ps1",
+    # 交付物从同源静态目录直出，下列可被浏览器内联执行 → 存储型 XSS
+    ".html", ".htm", ".xhtml", ".shtml", ".svg",
 }
 
 
@@ -169,7 +171,7 @@ async def upload_deliverable(
         raise
     except Exception as exc:
         logger.exception("Deliverable upload failed")
-        raise HTTPException(status_code=500, detail=f"Deliverable upload failed: {exc}")
+        raise HTTPException(status_code=500, detail="Deliverable upload failed")
 
 
 @router.get("", response_model=List[TaskDeliverableResponse])
@@ -200,7 +202,7 @@ def list_deliverables(
         raise
     except Exception as exc:
         logger.exception("Deliverable list failed")
-        raise HTTPException(status_code=500, detail=f"Deliverable list failed: {exc}")
+        raise HTTPException(status_code=500, detail="Deliverable list failed")
 
 
 @router.delete("/{deliverable_id}")
@@ -239,4 +241,4 @@ def delete_deliverable(
         raise
     except Exception as exc:
         logger.exception("Deliverable delete failed")
-        raise HTTPException(status_code=500, detail=f"Deliverable delete failed: {exc}")
+        raise HTTPException(status_code=500, detail="Deliverable delete failed")

@@ -206,7 +206,7 @@ def create_agent(
         logger.exception("Agent registration failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent registration failed: {exc}",
+            detail="Agent registration failed",
         )
 
 

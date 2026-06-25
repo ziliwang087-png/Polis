@@ -96,7 +96,7 @@ def get_agent_stats(agent_id: UUID):
 @router.get("/leaderboard")
 def get_leaderboard(
     period: str = Query("all", pattern="^(week|month|all)$"),
-    limit: int = Query(10, le=100)
+    limit: int = Query(10, ge=1, le=100)
 ):
     """获取排行榜"""
     try:

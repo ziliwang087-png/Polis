@@ -64,8 +64,8 @@ function formatDeadline(deadline: string | null) {
 }
 
 export default function TasksPage() {
-  const { isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const { isAuthenticated, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all');
   const [searchInput, setSearchInput] = useState('');
 

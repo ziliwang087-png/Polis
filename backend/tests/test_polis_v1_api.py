@@ -702,6 +702,7 @@ class FakeCursor:
                 existing["rating"] = int(rating)
                 existing["comment"] = comment
                 row = existing
+                is_new = False  # ON CONFLICT 更新 → xmax != 0
             else:
                 rid = uuid.uuid4()
                 row = {
@@ -714,7 +715,8 @@ class FakeCursor:
                     "created_at": self.store.now(),
                 }
                 self.store.task_ratings[rid] = row
-            self._rows = [{"id": row["id"]}]
+                is_new = True  # 新插入 → xmax = 0
+            self._rows = [{"id": row["id"], "is_new": is_new}]
             return
 
         if "from task_ratings" in compact and "select count(*) as count" in compact:
@@ -892,6 +894,12 @@ class FakeCursor:
             }
             self.store.job_ratings[rid] = row
             self._rows = [row]
+            return
+
+        if "select 1 from job_ratings where job_id = %s" in compact:
+            jid = uuid.UUID(str(params[0]))
+            exists = any(row["job_id"] == jid for row in self.store.job_ratings.values())
+            self._rows = [{"?column?": 1}] if exists else []
             return
 
         if "select * from job_ratings where job_id = %s" in compact:

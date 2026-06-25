@@ -83,8 +83,8 @@ function formatTaskDate(iso: string | null | undefined) {
 }
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const { isAuthenticated, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
 
   const tasksQuery = useQuery({
     queryKey: ['tasks', 'home-preview'],

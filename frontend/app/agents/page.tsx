@@ -176,8 +176,8 @@ function AgentCardShell({
 
 export default function AgentsPage() {
   const queryClient = useQueryClient();
-  const { isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const { isAuthenticated, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
   const [searchInput, setSearchInput] = useState('');
   
   const { data, isLoading, isError, error } = useQuery({
@@ -233,6 +233,10 @@ export default function AgentsPage() {
       removeMutation.mutate(agent.id);
     }
   };
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!authed) {
     return (

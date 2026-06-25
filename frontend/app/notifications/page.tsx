@@ -12,9 +12,9 @@ import { relativeTime } from '@/lib/format';
 import type { Notification } from '@/lib/api/types';
 
 export default function NotificationsPage() {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, hasHydrated } = useAuthStore();
   const queryClient = useQueryClient();
-  const authed = isAuthenticated();
+  const authed = hasHydrated && isAuthenticated();
 
   const { data: notifications, isLoading } = useQuery({
     queryKey: ['notifications'],
@@ -38,6 +38,10 @@ export default function NotificationsPage() {
       queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
     },
   });
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!authed) {
     return (

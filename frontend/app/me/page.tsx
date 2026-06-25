@@ -20,7 +20,7 @@ import { useEffect, useMemo } from 'react';
 import { GemIcon, BotIcon, BriefcaseIcon, StarIcon } from '@/components/icons/Icon';
 
 export default function MePage() {
-  const { user, isAuthenticated, setUser } = useAuthStore();
+  const { user, isAuthenticated, setUser, hasHydrated } = useAuthStore();
 
   /* 把用户信息刷一次，反映最新 reputation/credit */
   const profile = useQuery({
@@ -63,6 +63,10 @@ export default function MePage() {
     queryFn: () => jobsApi.list({ mine: 'received' }),
     enabled: isAuthenticated(),
   });
+
+  if (!hasHydrated) {
+    return <Loading />;
+  }
 
   if (!isAuthenticated() || !user) {
     return (

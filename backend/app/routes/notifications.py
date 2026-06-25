@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @router.get("")
 def list_notifications(
     read: Optional[bool] = Query(None),
-    limit: int = Query(20, le=100),
+    limit: int = Query(20, ge=1, le=100),
     current_user: tuple = Depends(get_current_user)
 ):
     """查询当前用户的通知"""
@@ -49,7 +49,7 @@ def list_notifications(
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Notification listing failed: {str(e)}"
+            detail="Notification listing failed"
         )
 
 

@@ -300,7 +300,7 @@ def create_task(
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Task creation failed: {str(e)}"
+            detail="Task creation failed"
         )
 
 @router.get("", response_model=List[TaskListResponse])
@@ -777,7 +777,7 @@ def get_task_detail(task_id: UUID):
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Task detail fetch failed: {str(e)}"
+            detail="Task detail fetch failed"
         )
 
 @router.post("/{task_id}/apply", response_model=TaskApplyResponse)
@@ -845,32 +845,50 @@ def assign_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             
-            # Verify owner owns the task
-            cur.execute("SELECT owner_id, status FROM tasks WHERE id = %s", (str(task_id),))
+            # Verify owner owns the task. FOR UPDATE 防止与 claim 等并发。
+            cur.execute(
+                "SELECT owner_id, status FROM tasks WHERE id = %s FOR UPDATE",
+                (str(task_id),),
+            )
             task = cur.fetchone()
-            
+
             if not task:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Task not found"
                 )
-            
-            if task['owner_id'] != owner_id:
+
+            if not _ids_equal(task.get('owner_id'), owner_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You don't own this task"
                 )
-            
+
+            # 只允许指派「未被认领」的任务，避免把 completed/cancelled 任务重置回 claimed。
+            if task['status'] != 'open':
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Task is not open for assignment"
+                )
+
+            # 校验目标 agent 存在
+            cur.execute("SELECT id FROM agents WHERE id = %s", (str(request.agent_id),))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found"
+                )
+
             # Update task
             cur.execute(
                 """
-                UPDATE tasks 
+                UPDATE tasks
                 SET assigned_agent_id = %s, status = 'claimed', updated_at = NOW()
                 WHERE id = %s
                 """,
-                (request.agent_id, task_id)
+                (str(request.agent_id), str(task_id))
             )
-            
+
             # Update application status
             cur.execute(
                 """
@@ -878,9 +896,9 @@ def assign_task(
                 SET status = 'accepted', reviewed_at = NOW()
                 WHERE task_id = %s AND agent_id = %s
                 """,
-                (task_id, request.agent_id)
+                (str(task_id), str(request.agent_id))
             )
-            
+
             # Reject other applications
             cur.execute(
                 """
@@ -888,7 +906,7 @@ def assign_task(
                 SET status = 'rejected', reviewed_at = NOW()
                 WHERE task_id = %s AND agent_id != %s
                 """,
-                (task_id, request.agent_id)
+                (str(task_id), str(request.agent_id))
             )
             
             logger.info(f"Task {task_id} assigned to agent {request.agent_id}")
@@ -1008,25 +1026,34 @@ def review_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             
-            # Verify owner owns the task
+            # Verify owner owns the task. FOR UPDATE 锁住该行，配合状态校验防止
+            # 并发/重复 review 导致重复发放声誉。
             cur.execute(
-                "SELECT owner_id, assigned_agent_id FROM tasks WHERE id = %s",
+                "SELECT owner_id, assigned_agent_id, status FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),)
             )
             task = cur.fetchone()
-            
+
             if not task:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Task not found"
                 )
-            
-            if task['owner_id'] != owner_id:
+
+            if not _ids_equal(task.get('owner_id'), owner_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You don't own this task"
                 )
-            
+
+            # 仅允许对「已提交、待验收」的任务 review；已 completed/其它状态拒绝，
+            # 避免重复 review 无限刷声誉。
+            if task['status'] != 'submitted':
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Task is not awaiting review"
+                )
+
             # Get submission
             cur.execute(
                 "SELECT id, agent_id FROM task_submissions WHERE task_id = %s ORDER BY submitted_at DESC LIMIT 1",
@@ -1184,52 +1211,60 @@ def rate_task(
 
             agent_id = task['assigned_agent_id']
 
-            # 插入评分（如果已存在则更新）
+            # 插入评分（如果已存在则更新）。xmax=0 表示这是新插入而非冲突更新，
+            # 用它确保 XP/通知/徽章只在首次评分时发放，避免 owner 反复评分刷分。
             cur.execute(
                 """
                 INSERT INTO task_ratings (task_id, user_id, agent_id, rating, comment)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (task_id) DO UPDATE
                 SET rating = EXCLUDED.rating, comment = EXCLUDED.comment
-                RETURNING id
+                RETURNING id, (xmax = 0) AS is_new
                 """,
                 (str(task_id), str(user_id), str(agent_id), rating, comment)
             )
             result = cur.fetchone()
+            is_new_rating = bool(result['is_new'])
 
-            # 更新 agent 游戏化数据
-            xp_gain = rating * 20  # 1星=20XP, 5星=100XP
-            cur.execute(
-                """
-                UPDATE agents
-                SET
-                    xp = xp + %s,
-                    level = FLOOR((xp + %s) / 100.0) + 1,
-                    total_tasks_completed = total_tasks_completed + 1
-                WHERE id = %s
-                RETURNING xp, level
-                """,
-                (xp_gain, xp_gain, str(agent_id))
-            )
-            agent_result = cur.fetchone()
-
-            # 创建通知给 agent owner
-            cur.execute("SELECT owner_id FROM agents WHERE id = %s", (str(agent_id),))
-            agent_owner = cur.fetchone()
-            if agent_owner:
-                create_notification(
-                    conn,
-                    agent_owner['owner_id'],
-                    'task_rated',
-                    f'任务获得 {rating} 星评价',
-                    f'您的 Agent 完成的任务获得了 {rating} 星评价，获得 {xp_gain} XP！',
-                    f'/tasks/{task_id}'
+            if is_new_rating:
+                # 仅首次评分发放游戏化奖励
+                xp_gain = rating * 20  # 1星=20XP, 5星=100XP
+                cur.execute(
+                    """
+                    UPDATE agents
+                    SET
+                        xp = xp + %s,
+                        level = FLOOR((xp + %s) / 100.0) + 1,
+                        total_tasks_completed = total_tasks_completed + 1
+                    WHERE id = %s
+                    RETURNING xp, level
+                    """,
+                    (xp_gain, xp_gain, str(agent_id))
                 )
+                agent_result = cur.fetchone()
 
-            # 检查徽章
-            _check_and_award_badges(conn, agent_id)
+                # 创建通知给 agent owner
+                cur.execute("SELECT owner_id FROM agents WHERE id = %s", (str(agent_id),))
+                agent_owner = cur.fetchone()
+                if agent_owner:
+                    create_notification(
+                        conn,
+                        agent_owner['owner_id'],
+                        'task_rated',
+                        f'任务获得 {rating} 星评价',
+                        f'您的 Agent 完成的任务获得了 {rating} 星评价，获得 {xp_gain} XP！',
+                        f'/tasks/{task_id}'
+                    )
 
-            logger.info(f"Task {task_id} rated {rating} stars, agent {agent_id} gained {xp_gain} XP")
+                # 检查徽章
+                _check_and_award_badges(conn, agent_id)
+            else:
+                # 重复评分：只更新分数，不再加 XP
+                xp_gain = 0
+                cur.execute("SELECT xp, level FROM agents WHERE id = %s", (str(agent_id),))
+                agent_result = cur.fetchone()
+
+            logger.info(f"Task {task_id} rated {rating} stars (new={is_new_rating}), agent {agent_id} gained {xp_gain} XP")
 
             return {
                 "success": True,

@@ -37,8 +37,8 @@ const CATEGORY_LABEL: Record<CommunityCategory, string> = {
 
 export default function CommunityPage() {
   const queryClient = useQueryClient();
-  const { isAuthenticated, user } = useAuthStore();
-  const authed = isAuthenticated();
+  const { isAuthenticated, user, hasHydrated } = useAuthStore();
+  const authed = hasHydrated && isAuthenticated();
   const [category, setCategory] = useState<'all' | CommunityCategory>('all');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');

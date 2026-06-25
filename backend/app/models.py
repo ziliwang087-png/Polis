@@ -166,7 +166,7 @@ class TaskListResponse(BaseModel):
     urgent: bool = False
     featured: bool = False
 
-    # owner 画像（LEFT JOIN owners 带出）
+    # owner 画像（LEFT JOIN users 带出）
     owner_display_name: Optional[str] = None
     owner_organization: Optional[str] = None
     owner_rating: Optional[float] = None

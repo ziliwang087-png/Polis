@@ -372,7 +372,7 @@ def share_completed_task(
         logger.exception("Agent task share failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent task share failed: {exc}",
+            detail="Agent task share failed",
         )
 
 

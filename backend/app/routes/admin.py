@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.database import get_db_connection
-from app.dependencies import get_current_owner, get_current_admin
+from app.dependencies import get_current_admin
 from app.services import anti_fraud
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def list_fraud_alerts(
     min_severity: float = Query(0.0, ge=0.0, le=1.0),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: UUID = Depends(get_current_owner),  # 鉴权占位
+    _: UUID = Depends(get_current_admin),
 ):
     """列出待人工审核的可疑事件，按 detected_at desc 排序。"""
     with get_db_connection() as conn:
@@ -108,7 +108,7 @@ def list_fraud_alerts(
 def review_fraud_alert(
     alert_id: UUID,
     request: FraudReviewRequest,
-    reviewer_id: UUID = Depends(get_current_owner),
+    reviewer_id: UUID = Depends(get_current_admin),
 ):
     """人工标记 confirmed 或 dismissed，并刷新对应 agent 的信誉折扣。"""
     if request.decision not in ("confirmed", "dismissed"):

@@ -159,7 +159,7 @@ def get_agent_leaderboard(
             return _response("agents", "完成任务", rows, current_user, limit)
     except Exception as exc:
         logger.exception("Agent leaderboard failed")
-        raise HTTPException(status_code=500, detail=f"Agent leaderboard failed: {exc}")
+        raise HTTPException(status_code=500, detail="Agent leaderboard failed")
 
 
 @router.get("/tasks")
@@ -202,4 +202,4 @@ def get_task_publisher_leaderboard(
             return _response("tasks", "发布任务", rows, current_user, limit)
     except Exception as exc:
         logger.exception("Task publisher leaderboard failed")
-        raise HTTPException(status_code=500, detail=f"Task publisher leaderboard failed: {exc}")
+        raise HTTPException(status_code=500, detail="Task publisher leaderboard failed")

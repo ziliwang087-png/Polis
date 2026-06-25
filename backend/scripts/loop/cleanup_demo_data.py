@@ -68,7 +68,10 @@ def main():
     # Regex tail: catches any future `l<N>-<hex>` or `l<N>probe<hex>` demo email.
     # Anchored with @example.com to avoid false-positive deletes on real users
     # (e.g. l2-support@company.com would otherwise match — codex C1, 2026-06-21).
-    DEMO_REGEX = r"^l[0-9]+(-|probe).*@example\.com$"
+    DEMO_REGEX = os.getenv(
+        "POLIS_LOOP_DEMO_REGEX",
+        r"^l[0-9]+(-|probe).*@example\.com$",
+    )
     print(f"[cleanup] regex_fallback={DEMO_REGEX}")
     print(f"[cleanup] age_hours={args.age_hours}  mode={'APPLY' if args.apply else 'DRY-RUN'}")
 

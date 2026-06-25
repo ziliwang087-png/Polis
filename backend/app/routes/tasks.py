@@ -932,6 +932,7 @@ def submit_task(
                 agent_id = _resolve_agent_for_token(
                     cur,
                     authorization,
+                    requested_agent_id=request.agent_id,
                     assigned_agent_id=task.get("assigned_agent_id"),
                 )
             
@@ -967,7 +968,7 @@ def submit_task(
                 """,
                 (
                     task_id, agent_id, request.content, request.deliverable_url,
-                    result_hash, evidence_urls, work_log
+                    result_hash, _json(evidence_urls), _json(work_log)
                 )
             )
             result = cur.fetchone()

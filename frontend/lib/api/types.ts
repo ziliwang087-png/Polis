@@ -321,6 +321,7 @@ export interface TaskDeliverable {
   id: string;
   task_id: string;
   uploaded_by: string;
+  uploaded_by_type: 'agent' | 'user';
   file_name: string;
   file_url: string;
   file_size: number;

@@ -5,12 +5,15 @@ Pytest conftest — 提供假 DB 给 anti_fraud 单元测试用。
 from __future__ import annotations
 
 import re
+import os
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
+
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 
 class FakeCursor:

@@ -30,6 +30,7 @@ class TaskDeliverableResponse(BaseModel):
     id: UUID
     task_id: UUID
     uploaded_by: UUID
+    uploaded_by_type: str = "agent"
     file_name: str
     file_url: str
     file_size: int
@@ -70,16 +71,50 @@ def _load_task(cur, task_id: UUID):
     return task
 
 
-def _can_view(task, current_user: CurrentUser) -> bool:
+def _can_view(cur, task, current_user: CurrentUser) -> bool:
     subject_id, subject_type = current_user
     if subject_type == "agent":
         return _ids_equal(task.get("assigned_agent_id"), subject_id)
-    return _ids_equal(task.get("owner_id"), subject_id)
+    if _ids_equal(task.get("owner_id"), subject_id):
+        return True
+    return _ids_equal(_agent_owner_id(cur, task.get("assigned_agent_id")), subject_id)
 
 
-def _can_upload(task, current_user: CurrentUser) -> bool:
+def _agent_owner_id(cur, agent_id) -> Optional[UUID]:
+    if not agent_id:
+        return None
+    cur.execute("SELECT owner_id FROM agents WHERE id = %s", (str(agent_id),))
+    agent = cur.fetchone()
+    return agent.get("owner_id") if agent else None
+
+
+def _can_upload(cur, task, current_user: CurrentUser) -> bool:
     subject_id, subject_type = current_user
-    return subject_type == "agent" and _ids_equal(task.get("assigned_agent_id"), subject_id)
+    if subject_type == "agent":
+        return _ids_equal(task.get("assigned_agent_id"), subject_id)
+    if _ids_equal(task.get("owner_id"), subject_id):
+        return True
+    return _ids_equal(_agent_owner_id(cur, task.get("assigned_agent_id")), subject_id)
+
+
+def _upload_identity(cur, task, current_user: CurrentUser) -> Tuple[UUID, str]:
+    subject_id, subject_type = current_user
+    if subject_type == "agent":
+        return subject_id, "agent"
+    if _ids_equal(_agent_owner_id(cur, task.get("assigned_agent_id")), subject_id):
+        return UUID(str(task["assigned_agent_id"])), "agent"
+    return subject_id, "user"
+
+
+def _can_delete(cur, task, deliverable, current_user: CurrentUser) -> bool:
+    subject_id, subject_type = current_user
+    if _ids_equal(task.get("owner_id"), subject_id):
+        return True
+    if subject_type == "agent":
+        return _ids_equal(deliverable.get("uploaded_by"), subject_id)
+    if deliverable.get("uploaded_by_type") == "user":
+        return _ids_equal(deliverable.get("uploaded_by"), subject_id)
+    return _ids_equal(_agent_owner_id(cur, deliverable.get("uploaded_by")), subject_id)
 
 
 @router.post("", response_model=TaskDeliverableResponse)
@@ -89,8 +124,7 @@ async def upload_deliverable(
     description: Optional[str] = Form(None),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Assigned agent uploads a deliverable file."""
-    subject_id, _ = current_user
+    """Assigned agent or task owner uploads a deliverable file."""
     try:
         content = await file.read()
         _ensure_allowed_file(file.filename or "deliverable", len(content))
@@ -98,30 +132,32 @@ async def upload_deliverable(
         with get_db_connection() as conn:
             cur = conn.cursor()
             task = _load_task(cur, task_id)
-            if not _can_upload(task, current_user):
-                raise HTTPException(status_code=403, detail="Only the assigned agent can upload deliverables")
+            if not _can_upload(cur, task, current_user):
+                raise HTTPException(status_code=403, detail="Only the task owner or assigned agent can upload deliverables")
             if task["status"] not in ("in_progress", "submitted"):
                 raise HTTPException(status_code=409, detail="Task is not ready for deliverables")
 
+            upload_subject_id, upload_subject_type = _upload_identity(cur, task, current_user)
             file_url = storage.upload_bytes(
                 data=content,
                 filename=file.filename or "deliverable",
                 content_type=file.content_type or "application/octet-stream",
-                owner_id=subject_id,
+                owner_id=upload_subject_id,
                 bucket=settings.SUPABASE_DELIVERABLES_BUCKET,
                 path_prefix=str(task_id),
             )
             cur.execute(
                 """
                 INSERT INTO task_deliverables (
-                    task_id, uploaded_by, file_name, file_url, file_size, description
+                    task_id, uploaded_by, uploaded_by_type, file_name, file_url, file_size, description
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING id, task_id, uploaded_by, file_name, file_url, file_size, description, created_at
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, task_id, uploaded_by, uploaded_by_type, file_name, file_url, file_size, description, created_at
                 """,
                 (
                     str(task_id),
-                    str(subject_id),
+                    str(upload_subject_id),
+                    upload_subject_type,
                     file.filename or "deliverable",
                     file_url,
                     len(content),
@@ -146,12 +182,13 @@ def list_deliverables(
         with get_db_connection() as conn:
             cur = conn.cursor()
             task = _load_task(cur, task_id)
-            if not _can_view(task, current_user):
+            if not _can_view(cur, task, current_user):
                 raise HTTPException(status_code=403, detail="You cannot view these deliverables")
 
             cur.execute(
                 """
-                SELECT id, task_id, uploaded_by, file_name, file_url, file_size, description, created_at
+                SELECT id, task_id, uploaded_by, COALESCE(uploaded_by_type, 'agent') AS uploaded_by_type,
+                    file_name, file_url, file_size, description, created_at
                 FROM task_deliverables
                 WHERE task_id = %s
                 ORDER BY created_at DESC
@@ -180,13 +217,17 @@ def delete_deliverable(
             task = _load_task(cur, task_id)
 
             cur.execute(
-                "SELECT * FROM task_deliverables WHERE id = %s AND task_id = %s",
+                """
+                SELECT *, COALESCE(uploaded_by_type, 'agent') AS uploaded_by_type
+                FROM task_deliverables
+                WHERE id = %s AND task_id = %s
+                """,
                 (str(deliverable_id), str(task_id)),
             )
             deliverable = cur.fetchone()
             if not deliverable:
                 raise HTTPException(status_code=404, detail="Deliverable not found")
-            if not (_ids_equal(task.get("owner_id"), subject_id) or _ids_equal(deliverable.get("uploaded_by"), subject_id)):
+            if not _can_delete(cur, task, deliverable, current_user):
                 raise HTTPException(status_code=403, detail="You cannot delete this deliverable")
 
             cur.execute(

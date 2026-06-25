@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "Polis API"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    RATE_LIMIT_ENABLED: bool = True
 
     # Supabase Storage
     SUPABASE_URL: Optional[str] = None

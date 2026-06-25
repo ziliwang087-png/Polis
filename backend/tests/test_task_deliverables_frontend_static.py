@@ -15,6 +15,8 @@ def test_task_deliverables_frontend_controls_exist():
     assert "type=\"file\"" in page_text
     assert "deliverablesApi.upload" in page_text
     assert "deliverablesApi.list" in page_text
+    assert "canUploadDeliverable" in page_text
+    assert "isTaskOwner" in page_text
     assert "下载" in page_text
 
     api_text = api.read_text()
@@ -24,6 +26,7 @@ def test_task_deliverables_frontend_controls_exist():
 
     type_text = types.read_text()
     assert "TaskDeliverable" in type_text
+    assert "uploaded_by_type" in type_text
 
     assert migration.exists()
     migration_text = migration.read_text()

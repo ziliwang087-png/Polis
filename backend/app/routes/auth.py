@@ -9,6 +9,7 @@ from slowapi.util import get_remote_address
 from typing import Optional
 
 from app.auth import create_access_token, hash_password, verify_password
+from app.config import settings
 from app.database import get_db_connection
 from app.dependencies import get_current_user
 from app.models import (
@@ -21,7 +22,7 @@ from app.models import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, enabled=settings.RATE_LIMIT_ENABLED)
 
 
 def _user_response(row) -> UserInfo:

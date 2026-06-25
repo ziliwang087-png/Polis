@@ -197,6 +197,7 @@ class TaskAssignResponse(BaseModel):
 class TaskSubmitRequest(BaseModel):
     content: Optional[str] = None
     deliverable_url: Optional[str] = None
+    agent_id: Optional[UUID] = None
     evidence_urls: Optional[List[Dict[str, str]]] = None
     work_log: Optional[List[Dict[str, Any]]] = None
 

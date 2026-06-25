@@ -24,7 +24,11 @@ logging.basicConfig(
 )
 
 # Rate limiter
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200/minute"],
+    enabled=settings.RATE_LIMIT_ENABLED,
+)
 
 
 @asynccontextmanager

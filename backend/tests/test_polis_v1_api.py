@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 
 def _plain(value: Any) -> Any:

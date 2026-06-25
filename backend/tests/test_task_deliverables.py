@@ -30,16 +30,22 @@ class DeliverableCursor:
             task = self.store["tasks"].get(params[0]) or self.store["tasks"].get(__import__("uuid").UUID(str(params[0])))
             self._rows = [task] if task else []
             return
+        if compact.startswith("select owner_id from agents where id = %s"):
+            agent_id = __import__("uuid").UUID(str(params[0]))
+            owner_id = self.store.get("agents", {}).get(agent_id)
+            self._rows = [{"owner_id": owner_id}] if owner_id else []
+            return
         if compact.startswith("insert into task_deliverables"):
             did = uuid4()
             row = {
                 "id": did,
                 "task_id": __import__("uuid").UUID(str(params[0])),
                 "uploaded_by": __import__("uuid").UUID(str(params[1])),
-                "file_name": params[2],
-                "file_url": params[3],
-                "file_size": params[4],
-                "description": params[5],
+                "uploaded_by_type": params[2],
+                "file_name": params[3],
+                "file_url": params[4],
+                "file_size": params[5],
+                "description": params[6],
                 "created_at": datetime.now(),
             }
             self.store["deliverables"][did] = row
@@ -52,11 +58,19 @@ class DeliverableCursor:
                 if row["task_id"] == task_id
             ]
             return
-        if compact.startswith("select * from task_deliverables where id = %s and task_id = %s"):
+        if (
+            "from task_deliverables" in compact
+            and "where id = %s and task_id = %s" in compact
+            and not compact.startswith("delete")
+        ):
             did = __import__("uuid").UUID(str(params[0]))
             task_id = __import__("uuid").UUID(str(params[1]))
             row = self.store["deliverables"].get(did)
-            self._rows = [row] if row and row["task_id"] == task_id else []
+            if row and row["task_id"] == task_id:
+                row = {**row, "uploaded_by_type": row.get("uploaded_by_type", "agent")}
+                self._rows = [row]
+            else:
+                self._rows = []
             return
         if compact.startswith("delete from task_deliverables"):
             did = __import__("uuid").UUID(str(params[0]))
@@ -126,10 +140,71 @@ def test_assigned_agent_uploads_and_lists_deliverables(monkeypatch):
     )
 
     assert created.file_name == "result.md"
+    assert created.uploaded_by == agent_id
+    assert created.uploaded_by_type == "agent"
     assert created.file_url == "https://files.example/result.md"
     assert created.file_size == 8
 
     listed = routes.list_deliverables(task_id, current_user=(owner_id, "user"))
+    assert [item.id for item in listed] == [created.id]
+
+
+def test_task_owner_uploads_and_lists_deliverables(monkeypatch):
+    owner_id = uuid4()
+    agent_id = uuid4()
+    task_id = uuid4()
+    store = {
+        "tasks": {
+            task_id: {
+                "id": task_id,
+                "owner_id": owner_id,
+                "assigned_agent_id": agent_id,
+                "status": "in_progress",
+            }
+        },
+        "deliverables": {},
+    }
+    routes = import_deliverables(monkeypatch, store)
+
+    created = asyncio.run(
+        routes.upload_deliverable(task_id, FakeUpload(), "owner upload", current_user=(owner_id, "user"))
+    )
+
+    assert created.uploaded_by == owner_id
+    assert created.uploaded_by_type == "user"
+    assert created.description == "owner upload"
+
+    listed = routes.list_deliverables(task_id, current_user=(agent_id, "agent"))
+    assert [item.id for item in listed] == [created.id]
+
+
+def test_assigned_agent_owner_user_uploads_as_agent(monkeypatch):
+    owner_id = uuid4()
+    agent_owner_id = uuid4()
+    agent_id = uuid4()
+    task_id = uuid4()
+    store = {
+        "tasks": {
+            task_id: {
+                "id": task_id,
+                "owner_id": owner_id,
+                "assigned_agent_id": agent_id,
+                "status": "in_progress",
+            }
+        },
+        "agents": {agent_id: agent_owner_id},
+        "deliverables": {},
+    }
+    routes = import_deliverables(monkeypatch, store)
+
+    created = asyncio.run(
+        routes.upload_deliverable(task_id, FakeUpload(), "agent owner upload", current_user=(agent_owner_id, "user"))
+    )
+
+    assert created.uploaded_by == agent_id
+    assert created.uploaded_by_type == "agent"
+
+    listed = routes.list_deliverables(task_id, current_user=(agent_owner_id, "user"))
     assert [item.id for item in listed] == [created.id]
 
 

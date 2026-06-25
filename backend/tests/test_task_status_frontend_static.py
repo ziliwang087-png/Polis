@@ -15,6 +15,8 @@ def test_task_status_frontend_controls_exist():
     assert "已接单" in page_text
     assert "开始工作" in page_text
     assert "提交交付物" in page_text
+    assert "canSubmitTask" in page_text
+    assert "task.assigned_agent_id" in page_text
     assert "验收通过" in page_text
     assert "打回重做" in page_text
     assert "取消任务" in page_text
@@ -24,6 +26,7 @@ def test_task_status_frontend_controls_exist():
     assert "/start" in api_text
     assert "submit:" in api_text
     assert "/submit" in api_text
+    assert "agent_id?: string" in api_text
     assert "accept:" in api_text
     assert "/accept" in api_text
     assert "requestRevision:" in api_text

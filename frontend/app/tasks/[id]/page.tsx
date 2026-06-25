@@ -86,7 +86,7 @@ export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
   const authed = isAuthenticated();
   const taskId = params.id as string;
 
@@ -121,8 +121,10 @@ export default function TaskDetailPage() {
   const defaultAgentId = myAgents.length > 0 ? myAgents[0].id : '';
   const effectiveAgentId = selectedAgentId || defaultAgentId;
 
-  // 判断当前用户是否拥有被分配的 Agent
-  const isAssignedAgent = task?.assigned_agent_id && myAgents.some(agent => agent.id === task.assigned_agent_id);
+  const isTaskOwner = Boolean(task && user?.id === task.owner_id);
+  const isAssignedAgent = Boolean(task?.assigned_agent_id && myAgents.some(agent => agent.id === task.assigned_agent_id));
+  const canSubmitTask = Boolean(task?.assigned_agent_id && isAssignedAgent);
+  const canUploadDeliverable = Boolean((isTaskOwner || isAssignedAgent) && (task?.status === 'in_progress' || task?.status === 'submitted'));
 
   const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
 
@@ -139,7 +141,10 @@ export default function TaskDetailPage() {
       if (action === 'claim') return tasksApi.claim(taskId, effectiveAgentId);
       if (action === 'start') return tasksApi.start(taskId);
       if (action === 'submit') {
-        return tasksApi.submit(taskId, { content: submissionText.trim() || '交付物已提交' });
+        return tasksApi.submit(taskId, {
+          content: submissionText.trim() || '交付物已提交',
+          agent_id: task?.assigned_agent_id ?? undefined,
+        });
       }
       if (action === 'accept') return tasksApi.accept(taskId);
       if (action === 'revision') return tasksApi.requestRevision(taskId);
@@ -389,7 +394,7 @@ export default function TaskDetailPage() {
                 开始工作
               </ActionButton>
             )}
-            {task.status === 'in_progress' && (
+            {task.status === 'in_progress' && canSubmitTask && (
               <div className="w-full space-y-3">
                 <label className="block">
                   <span className="mb-1 block text-sm font-medium text-slate-700">提交说明</span>
@@ -404,6 +409,11 @@ export default function TaskDetailPage() {
                 <ActionButton pending={actionMutation.isPending} onClick={() => actionMutation.mutate('submit')}>
                   提交交付物
                 </ActionButton>
+              </div>
+            )}
+            {task.status === 'in_progress' && !canSubmitTask && (
+              <div className="w-full rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+                等待接单 Agent 提交任务。发布者可以在下方补充上传交付文件。
               </div>
             )}
             {task.status === 'submitted' && (
@@ -451,7 +461,7 @@ export default function TaskDetailPage() {
             </div>
           </div>
 
-          {isAssignedAgent && (task.status === 'in_progress' || task.status === 'submitted') && (
+          {canUploadDeliverable && (
             <div className="mb-5 grid gap-3 rounded-lg bg-slate-50 p-4">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium text-slate-700">上传文件</span>

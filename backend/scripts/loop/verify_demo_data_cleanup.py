@@ -27,12 +27,14 @@ def fail(msg):
 
 def main():
     from app.database import get_db_connection
+    from app.config import settings
 
     suffix = uuid.uuid4().hex[:8]
     old_id = uuid.uuid4()
     fresh_id = uuid.uuid4()
-    old_email = f"l16probe-OLD-{suffix}@example.com"
-    fresh_email = f"l16probe-FRESH-{suffix}@example.com"
+    prefix = f"l16probe-{suffix}-"
+    old_email = f"{prefix}OLD@example.com"
+    fresh_email = f"{prefix}FRESH@example.com"
     old_job_id = uuid.uuid4()
     fresh_job_id = uuid.uuid4()
 
@@ -71,7 +73,9 @@ def main():
     try:
         # 3. dry-run with custom prefix to scope to ONLY our seeds
         env = os.environ.copy()
-        env["POLIS_LOOP_DEMO_PREFIXES"] = "l16probe-"
+        env["POLIS_LOOP_DEMO_PREFIXES"] = prefix
+        env["POLIS_LOOP_DEMO_REGEX"] = r"^$"
+        env.setdefault("DATABASE_URL", settings.DATABASE_URL)
         script = pathlib.Path(__file__).parent / "cleanup_demo_data.py"
         r = subprocess.run(
             [sys.executable, str(script), "--age-hours", "1"],

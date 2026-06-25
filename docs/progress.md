@@ -4,6 +4,55 @@
 
 ---
 
+## 2026-06-25（Thu）AEST
+
+### 13:09  修复：任务提交 500 + 发布者/Agent Owner 上传交付物权限
+
+**问题**：
+- 用户 abcdefg 在任务详情上传交付物时报 `Only the assigned agent can upload deliverables`
+- 任务状态为 `in_progress` 时点“提交交付物”报 `Task submission failed`
+
+**根因**：
+- `/tasks/{id}/deliverables` 后端只接受 agent token；浏览器里普通 user token 即使是任务发布者或 assigned agent 的 owner，也会被拒绝。
+- `task_deliverables.uploaded_by` 旧表结构外键固定到 `agents(id)`，无法记录任务发布者上传。
+- 前端 `/tasks/[id]` 调 `/submit` 时没有传 `agent_id`，user token 场景依赖后端自动推断。
+- `/tasks/{id}/submit` 写 `evidence_urls/work_log` JSONB 时直接传 Python list，真实 psycopg2 会报适配错误并变成 500。
+
+**修复**：
+- 交付物上传允许三类身份：assigned agent token、拥有 assigned agent 的 user token、任务发布者 user token。
+- 新迁移 `20260625_deliverable_uploads`：给 `task_deliverables` 加 `uploaded_by_type`，放开旧 `uploaded_by -> agents` 外键，支持 `agent/user` 两种上传者类型；同时补建生产缺失的 `task_submissions` 表。
+- `/submit` 请求体新增 `agent_id`，后端 user token 会验证该用户拥有 requested/assigned agent；JSONB 字段统一用 `Json(...)` 包装。
+- 前端任务详情页新增 `isTaskOwner / canSubmitTask / canUploadDeliverable`，提交时传 `task.assigned_agent_id`，发布者可上传文件但不会冒充 agent 提交任务状态。
+- 补 `RATE_LIMIT_ENABLED`，默认生产开启；pytest 下关闭，避免 slowapi 内存限流污染全量测试。
+- 修 verifier：`verify_frontend_smoke.py` 从旧 `/jobs/new` 改为当前 `/tasks/new`；`verify_demo_data_cleanup.py` 给 subprocess 传 `DATABASE_URL` 且用唯一 prefix；`cleanup_demo_data.py` 支持 `POLIS_LOOP_DEMO_REGEX` 覆盖，默认行为不变。
+
+**证据**：
+```
+date: 2026-06-25 13:09:16 AEST
+pytest tests -q: 94 passed
+run_eval_suite.py --prod: 5/5 PASS
+run_eval_suite.py --local: 5/5 PASS
+verify_install_token.py --base http://127.0.0.1:8765: ALL GREEN
+verify_byoa_agent_smoke.py: 6/6 PASS
+verify_fallback_detection.py: ALL CHECKS PASSED
+verify_agent_card_skills.py --api prod: PASS
+verify_frontend_smoke.py --base prod frontend: PASS - 8 routes clean
+verify_platform_agent_prod.py --api prod: PASS model='claude-opus-4-7'
+verify_rating_flow.py --api prod: PASS
+verify_inbox_status_filter.py --api local: ALL CHECKS PASSED
+verify_demo_data_cleanup.py: ALL CHECKS PASSED
+verify_platform_agent.py --api local: PASS
+verify_translator.py --api local: PASS
+verify_demo_agent_llm.py --api local: PASS
+Railway deploy eadd2a92: SUCCESS, alembic OK
+prod regression on polis-backend-production.up.railway.app: PASS (user-token submit + owner upload deliverable)
+```
+
+**备注**：
+- `npm run lint` / `npm run build` 在本机均超过 2 分钟无输出，已手动中断；本次前端改动由静态 pytest 覆盖。
+- 第一次 Railway 部署后真实 `/submit` 验证仍 500，日志显示 `relation "task_submissions" does not exist`；已在 migration 中补齐。
+- 未跟踪文件 `backend/app/routes/auth 2.py`、`frontend/app/jobs/`、`frontend/lib/store 2.ts` 是既有本地文件，未纳入本次提交。
+
 ## 2026-06-24（Wed）AEST
 
 ### 22:06  修复：User 上传交付物权限错误 (a6cd568)

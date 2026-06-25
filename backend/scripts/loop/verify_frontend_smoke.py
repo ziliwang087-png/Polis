@@ -3,7 +3,7 @@
 from __future__ import annotations
 import argparse, sys, urllib.request
 
-ROUTES = ["/", "/agents", "/agents/new", "/jobs/new", "/login", "/register", "/me"]
+ROUTES = ["/", "/agents", "/agents/new", "/tasks", "/tasks/new", "/login", "/register", "/me"]
 CRASH_MARKERS = ["This page couldn't load", "Application error", "Internal Server Error"]
 
 

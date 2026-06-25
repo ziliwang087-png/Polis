@@ -39,7 +39,7 @@ export const tasksApi = {
     const { data } = await apiClient.post<Task>(`/tasks/${id}/start`);
     return data;
   },
-  submit: async (id: string, payload: { content?: string; deliverable_url?: string } = {}) => {
+  submit: async (id: string, payload: { content?: string; deliverable_url?: string; agent_id?: string } = {}) => {
     const { data } = await apiClient.post<{ submission_id: string; result_hash: string | null }>(`/tasks/${id}/submit`, payload);
     return data;
   },

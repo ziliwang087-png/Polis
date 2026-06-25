@@ -6,6 +6,37 @@
 
 ## 2026-06-25（Thu）AEST
 
+### 14:17  修复：任务发布者无法给已完成任务评分
+
+**问题**：
+- 已完成任务详情页显示“给任务评分”，点击“提交评分”后 toast 报 `You don't own this task`
+- 截图环境：`polis-frontend-three.vercel.app`，登录用户显示 `abcdefg`
+
+**根因**：
+- `/tasks/{id}/rate` 使用 `Depends(get_current_user)`，但 `get_current_user()` 返回 `(subject_id, subject_type)` tuple；评分逻辑把 `tasks.owner_id` 和这个 tuple 比较，任务发布者也会被误判为非 owner。
+- 前端只按 `task.status === 'completed'` 展示评分表单，非任务发布者也能看到并点击一个后端必然拒绝的动作。
+
+**修复**：
+- 后端 `/tasks/{id}/rate` 改用 `get_current_owner`，并用 `_ids_equal()` 做 owner 比较，避免 UUID/string 类型差异。
+- 前端任务详情页新增 `canRateTask = isTaskOwner && completed`，只有任务发布者能看到评分表单；其他用户看到“只有任务发布者可以评分”。
+- 补回归测试：任务 owner 完成验收后可调 `/tasks/{id}/rate` 成功；评分 UI owner-only。
+
+**证据**：
+```
+date: 2026-06-25 14:17:59 AEST
+red test before fix: test_task_owner_can_rate_completed_task -> 403
+target pytest: 2 passed
+pytest backend/tests -q: 97 passed
+run_eval_suite.py --prod: 5/5 PASS
+verify_byoa_agent_smoke.py: 6/6 PASS
+verify_agent_card_skills.py --api prod: PASS
+verify_frontend_smoke.py --base prod frontend: PASS - 8 routes clean
+local run_eval_suite.py --local: 3/5 PASS; health/deep passed, admin local verifiers timed out after first 200 response
+```
+
+**备注**：
+- `npm run lint` 和 `npx tsc --noEmit --pretty false` 本地均超过 2 分钟无输出，已中断；本次前端改动由静态 pytest + prod frontend smoke 覆盖。
+
 ### 13:09  修复：任务提交 500 + 发布者/Agent Owner 上传交付物权限
 
 **问题**：

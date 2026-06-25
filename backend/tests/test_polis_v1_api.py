@@ -32,6 +32,7 @@ class FakePolisStore:
         self.agent_skills: dict[uuid.UUID, dict[str, Any]] = {}
         self.tasks: dict[uuid.UUID, dict[str, Any]] = {}
         self.task_submissions: dict[uuid.UUID, dict[str, Any]] = {}
+        self.task_ratings: dict[uuid.UUID, dict[str, Any]] = {}
         self.jobs: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_artifacts: dict[uuid.UUID, dict[str, Any]] = {}
         self.job_ratings: dict[uuid.UUID, dict[str, Any]] = {}
@@ -227,6 +228,12 @@ class FakeCursor:
         if "select * from agents where id = %s" in compact:
             aid = uuid.UUID(str(params[0]))
             self._rows = [self.store.agents[aid]] if aid in self.store.agents else []
+            return
+
+        if compact == "select owner_id from agents where id = %s":
+            aid = uuid.UUID(str(params[0]))
+            row = self.store.agents.get(aid)
+            self._rows = [{"owner_id": row["owner_id"]}] if row else []
             return
 
         if compact == "select status from agents where id = %s":
@@ -582,6 +589,18 @@ class FakeCursor:
             ] if row else []
             return
 
+        if compact.startswith("select owner_id, assigned_agent_id, status from tasks where id = %s"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks.get(tid)
+            self._rows = [
+                {
+                    "owner_id": row["owner_id"],
+                    "assigned_agent_id": row["assigned_agent_id"],
+                    "status": row["status"],
+                }
+            ] if row else []
+            return
+
         if compact.startswith("update tasks set assigned_agent_id = %s, status = 'claimed'"):
             agent_id, tid = uuid.UUID(str(params[0])), uuid.UUID(str(params[1]))
             row = self.store.tasks[tid]
@@ -666,6 +685,36 @@ class FakeCursor:
             }
             self.store.task_submissions[sid] = row
             self._rows = [{"id": sid}]
+            return
+
+        if compact.startswith("insert into task_ratings"):
+            task_id, user_id, agent_id, rating, comment = params[:5]
+            task_uuid = uuid.UUID(str(task_id))
+            existing = next(
+                (
+                    row
+                    for row in self.store.task_ratings.values()
+                    if row["task_id"] == task_uuid
+                ),
+                None,
+            )
+            if existing:
+                existing["rating"] = int(rating)
+                existing["comment"] = comment
+                row = existing
+            else:
+                rid = uuid.uuid4()
+                row = {
+                    "id": rid,
+                    "task_id": task_uuid,
+                    "user_id": uuid.UUID(str(user_id)),
+                    "agent_id": uuid.UUID(str(agent_id)),
+                    "rating": int(rating),
+                    "comment": comment,
+                    "created_at": self.store.now(),
+                }
+                self.store.task_ratings[rid] = row
+            self._rows = [{"id": row["id"]}]
             return
 
         if "from task_ratings" in compact and "select count(*) as count" in compact:
@@ -1287,6 +1336,84 @@ def test_task_budget_reserves_and_pays_credits_to_agent_owner(polis_client):
     assert polis_client.store.users[owner_id]["credit_balance"] == 75
     assert polis_client.store.users[agent_owner_id]["credit_balance"] == 125
     assert polis_client.store.users[agent_owner_id]["reputation"] == 50
+
+
+def test_task_owner_can_rate_completed_task(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "rate-owner@example.com",
+            "password": "secret123",
+            "username": "rateowner",
+        },
+    )
+    agent_owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "rate-agent-owner@example.com",
+            "password": "secret123",
+            "username": "rateagentowner",
+        },
+    )
+    owner_token = owner_response.json()["token"]
+    agent_owner_token = agent_owner_response.json()["token"]
+
+    agent_response = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
+        json={
+            "name": "rated-worker",
+            "display_name": "Rated Worker",
+            "description": "Finishes tasks that can be rated.",
+            "auth_method": "none",
+        },
+    )
+    agent = agent_response.json()
+
+    create_response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "title": "Rate this finished task",
+            "description": "Complete the task so the owner can rate it.",
+            "budget": 5,
+        },
+    )
+    task_id = create_response.json()["task_id"]
+
+    polis_client.post(
+        f"/api/v1/tasks/{task_id}/claim",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+    )
+    polis_client.post(
+        f"/api/v1/tasks/{task_id}/start",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+    )
+    polis_client.post(
+        f"/api/v1/tasks/{task_id}/submit",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+        json={"content": "done"},
+    )
+    accept_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/accept",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert accept_response.status_code == 200
+
+    rate_response = polis_client.post(
+        f"/api/v1/tasks/{task_id}/rate",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        params={"rating": 5, "comment": "Good delivery"},
+    )
+
+    assert rate_response.status_code == 200
+    body = rate_response.json()
+    assert body["success"] is True
+    assert body["xp_gained"] == 100
+    stored_rating = next(iter(polis_client.store.task_ratings.values()))
+    assert str(stored_rating["task_id"]) == task_id
+    assert stored_rating["rating"] == 5
+    assert stored_rating["comment"] == "Good delivery"
 
 
 def test_new_user_credit_default_is_100_in_auth_and_migrations():

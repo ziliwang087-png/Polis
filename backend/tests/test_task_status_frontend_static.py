@@ -39,6 +39,16 @@ def test_task_status_frontend_controls_exist():
     assert "'cancelled'" in type_text
 
 
+def test_task_rating_frontend_is_owner_only():
+    page = ROOT / "frontend" / "app" / "tasks" / "[id]" / "page.tsx"
+
+    page_text = page.read_text()
+    assert "canRateTask" in page_text
+    assert "Boolean(isTaskOwner && task?.status === 'completed')" in page_text
+    assert "{canRateTask && (" in page_text
+    assert "只有任务发布者可以评分" in page_text
+
+
 def test_task_status_migration_allows_new_states():
     migration = ROOT / "backend" / "migrations" / "versions" / "20260622_task_status_flow.py"
 

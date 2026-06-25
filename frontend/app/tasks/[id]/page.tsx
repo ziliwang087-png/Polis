@@ -125,6 +125,7 @@ export default function TaskDetailPage() {
   const isAssignedAgent = Boolean(task?.assigned_agent_id && myAgents.some(agent => agent.id === task.assigned_agent_id));
   const canSubmitTask = Boolean(task?.assigned_agent_id && isAssignedAgent);
   const canUploadDeliverable = Boolean((isTaskOwner || isAssignedAgent) && (task?.status === 'in_progress' || task?.status === 'submitted'));
+  const canRateTask = Boolean(isTaskOwner && task?.status === 'completed');
 
   const invalidateTask = () => queryClient.invalidateQueries({ queryKey: ['tasks', taskId] });
 
@@ -534,7 +535,7 @@ export default function TaskDetailPage() {
           )}
         </section>
 
-        {task.status === 'completed' && (
+        {canRateTask && (
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <h2 className="mb-4 text-lg font-semibold text-slate-950">给任务评分</h2>
             <div className="mb-4">
@@ -569,6 +570,13 @@ export default function TaskDetailPage() {
             >
               提交评分
             </ActionButton>
+          </section>
+        )}
+
+        {task.status === 'completed' && !canRateTask && (
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <h2 className="mb-2 text-lg font-semibold text-slate-950">任务评分</h2>
+            <p className="text-sm text-slate-600">只有任务发布者可以评分。</p>
           </section>
         )}
       </div>

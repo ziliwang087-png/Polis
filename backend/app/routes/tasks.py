@@ -1144,7 +1144,7 @@ def rate_task(
     task_id: UUID,
     rating: int = Query(..., ge=1, le=5),
     comment: Optional[str] = None,
-    user_id: UUID = Depends(get_current_user)
+    user_id: UUID = Depends(get_current_owner),
 ):
     """用户给已完成的任务评分"""
     try:
@@ -1170,7 +1170,7 @@ def rate_task(
                     detail="Task is not completed yet"
                 )
 
-            if task['owner_id'] != user_id:
+            if not _ids_equal(task.get("owner_id"), user_id):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You don't own this task"

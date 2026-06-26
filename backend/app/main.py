@@ -4,7 +4,8 @@ Main application entry point
 """
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
+from typing import Optional
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -63,6 +64,8 @@ app = FastAPI(
     version="1.0.0",
     description="A2A-compatible task network for Chinese-speaking AI engineers",
     lifespan=lifespan,
+    docs_url=None if settings.ENV == "production" else "/docs",
+    openapi_url=None if settings.ENV == "production" else "/openapi.json",
 )
 
 # Attach rate limiter
@@ -116,7 +119,7 @@ def health():
 
 
 @app.get("/health/deep")
-async def health_deep():
+async def health_deep(x_health_token: Optional[str] = Header(None)):
     """Deep health: db ping + reaper state.
 
     Status semantics:
@@ -124,6 +127,12 @@ async def health_deep():
       degraded — anything off (db slow, reaper not ticking, etc.)
       unhealthy — db unreachable
     """
+    if settings.HEALTH_DEEP_TOKEN:
+        if x_health_token != settings.HEALTH_DEEP_TOKEN:
+            raise HTTPException(status_code=404, detail="Not found")
+    elif settings.ENV == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+
     def _db_ping():
         t0 = time.perf_counter()
         try:

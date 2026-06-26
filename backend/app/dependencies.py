@@ -1,14 +1,19 @@
 """
 FastAPI dependencies for authentication
 """
-from fastapi import Header, HTTPException, status
+from fastapi import Cookie, Header, HTTPException, status
 from typing import Optional, Tuple
 from uuid import UUID
 from app.auth import decode_access_token, hash_agent_token
 from app.database import get_db_connection
 
 
-def _extract_bearer(authorization: Optional[str]) -> str:
+def _extract_auth_token(
+    authorization: Optional[str],
+    polis_token: Optional[str] = None,
+) -> str:
+    if polis_token and not authorization:
+        return polis_token
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -29,9 +34,16 @@ def _extract_bearer(authorization: Optional[str]) -> str:
     return token
 
 
-def get_current_owner(authorization: Optional[str] = Header(None)) -> UUID:
+def _extract_bearer(authorization: Optional[str]) -> str:
+    return _extract_auth_token(authorization)
+
+
+def get_current_owner(
+    authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
+) -> UUID:
     """Dependency: extract a Polis user UUID from a JWT bearer token."""
-    token = _extract_bearer(authorization)
+    token = _extract_auth_token(authorization, polis_token)
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(
@@ -52,9 +64,12 @@ def get_current_owner(authorization: Optional[str] = Header(None)) -> UUID:
     return UUID(user_id)
 
 
-def get_current_agent(authorization: Optional[str] = Header(None)) -> UUID:
+def get_current_agent(
+    authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
+) -> UUID:
     """Dependency: extract an agent UUID from a JWT bearer token."""
-    token = _extract_bearer(authorization)
+    token = _extract_auth_token(authorization, polis_token)
     payload = decode_access_token(token)
     if payload and payload.get("type") == "agent":
         agent_id = payload.get("sub")
@@ -71,9 +86,12 @@ def get_current_agent(authorization: Optional[str] = Header(None)) -> UUID:
     )
 
 
-def get_current_user(authorization: Optional[str] = Header(None)) -> Tuple[UUID, str]:
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
+) -> Tuple[UUID, str]:
     """Return (subject_id, token_type) for user or agent JWTs."""
-    token = _extract_bearer(authorization)
+    token = _extract_auth_token(authorization, polis_token)
     payload = decode_access_token(token)
     if payload:
         user_type = payload.get("type", "user")
@@ -98,6 +116,17 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Tuple[UUID,
     )
 
 
+def try_get_current_user(
+    authorization: Optional[str] = None,
+    polis_token: Optional[str] = None,
+) -> Optional[Tuple[UUID, str]]:
+    """Best-effort auth for endpoints that expose a reduced public view."""
+    try:
+        return get_current_user(authorization, polis_token)
+    except HTTPException:
+        return None
+
+
 def _admin_user_ids() -> set:
     """Read admin allowlist from POLIS_ADMIN_USER_IDS env (comma-separated UUIDs)."""
     import os
@@ -107,7 +136,10 @@ def _admin_user_ids() -> set:
     return {p.strip() for p in raw.split(",") if p.strip()}
 
 
-def get_current_admin(authorization: Optional[str] = Header(None)) -> UUID:
+def get_current_admin(
+    authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
+) -> UUID:
     """Dependency: like get_current_owner, but ALSO requires the user
     to be in the POLIS_ADMIN_USER_IDS allowlist (or have is_admin=True
     in the JWT payload).
@@ -116,7 +148,7 @@ def get_current_admin(authorization: Optional[str] = Header(None)) -> UUID:
     we have. If POLIS_ADMIN_USER_IDS is unset, all admin endpoints
     deny by default.
     """
-    token = _extract_bearer(authorization)
+    token = _extract_auth_token(authorization, polis_token)
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(

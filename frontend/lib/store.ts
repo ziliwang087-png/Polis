@@ -5,17 +5,15 @@ import { create } from 'zustand';
 import type { User } from './api/types';
 
 interface AuthState {
-  token: string | null;
   user: User | null;
   hasHydrated: boolean;
   isAuthenticated: () => boolean;
   hydrateFromStorage: () => void;
-  setSession: (token: string, user: User) => void;
+  setSession: (user: User) => void;
   setUser: (user: User) => void;
   logout: () => void;
 }
 
-const TOKEN_KEY = 'polis_token';
 const USER_KEY = 'polis_user';
 
 function readUser(): User | null {
@@ -30,25 +28,22 @@ function readUser(): User | null {
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: null,
   user: null,
   hasHydrated: false,
 
-  isAuthenticated: () => !!get().token,
+  isAuthenticated: () => !!get().user,
 
   hydrateFromStorage: () => {
     if (typeof window === 'undefined') return;
     set({
-      token: localStorage.getItem(TOKEN_KEY),
       user: readUser(),
       hasHydrated: true,
     });
   },
 
-  setSession: (token, user) => {
-    localStorage.setItem(TOKEN_KEY, token);
+  setSession: (user) => {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
-    set({ token, user, hasHydrated: true });
+    set({ user, hasHydrated: true });
   },
 
   setUser: (user) => {
@@ -57,8 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    set({ token: null, user: null, hasHydrated: true });
+    set({ user: null, hasHydrated: true });
   },
 }));

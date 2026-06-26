@@ -30,6 +30,9 @@ class StatusCursor:
         if compact.startswith("select id, status, assigned_agent_id"):
             self._rows = [self.task]
             return
+        if compact == "select owner_id from agents where id = %s":
+            self._rows = [{"owner_id": self.task.get("agent_owner_id", uuid4())}]
+            return
         if compact.startswith("select assigned_agent_id, status"):
             self._rows = [self.task]
             return
@@ -66,6 +69,11 @@ class StatusCursor:
             self.task["status"] = "cancelled"
             self.task["updated_at"] = datetime.now()
             self._rows = [self.task]
+            return
+        if compact.startswith("update users set credit_balance = credit_balance + %s"):
+            self.task["refunded_points"] = params[0]
+            self.task["refunded_owner_id"] = params[1]
+            self._rows = []
             return
         if "insert into task_submissions" in compact:
             self.task["last_submission_params"] = params
@@ -147,7 +155,7 @@ def test_user_token_submits_with_requested_owned_agent(monkeypatch):
     task = make_task(owner_id, agent_id, status="in_progress")
     routes = import_tasks(monkeypatch, task)
 
-    monkeypatch.setattr(routes, "get_current_user", lambda authorization: (owner_id, "user"))
+    monkeypatch.setattr(routes, "get_current_user", lambda authorization, polis_token=None: (owner_id, "user"))
     monkeypatch.setattr(routes, "_agent_owned_by_user", lambda cur, requested_agent_id, user_id: {"id": requested_agent_id})
 
     submitted = routes.submit_task(

@@ -78,6 +78,10 @@ class FakeCursor:
         compact = re.sub(r"\s+", " ", sql.strip()).lower()
         self.store.queries.append(compact)
 
+        if compact == "select 1":
+            self._rows = [{"?column?": 1}]
+            return
+
         # users
         if "select id from users where email = %s or username = %s" in compact:
             email, username = params
@@ -652,6 +656,14 @@ class FakeCursor:
             self._rows = [row]
             return
 
+        if compact.startswith("update tasks set status = 'cancelled'"):
+            tid = uuid.UUID(str(params[0]))
+            row = self.store.tasks[tid]
+            row["status"] = "cancelled"
+            row["updated_at"] = self.store.now()
+            self._rows = [row]
+            return
+
         if "select * from tasks where id = %s" in compact:
             tid = uuid.UUID(str(params[0]))
             self._rows = [self.store.tasks[tid]] if tid in self.store.tasks else []
@@ -985,6 +997,7 @@ def polis_client(monkeypatch):
     monkeypatch.setattr(pool, "ThreadedConnectionPool", NoopConnectionPool)
 
     from app.main import app
+    from app import main as main_module
     from app.routes import agents as agents_routes
     from app.routes import auth as auth_routes
     from app.routes import community as community_routes
@@ -1003,6 +1016,7 @@ def polis_client(monkeypatch):
     monkeypatch.setattr(jobs_routes, "get_db_connection", connection_factory)
     monkeypatch.setattr(tasks_routes, "get_db_connection", connection_factory)
     monkeypatch.setattr(dependencies, "get_db_connection", connection_factory)
+    monkeypatch.setattr(main_module, "get_db_connection", connection_factory)
 
     def fake_upload(*, data: bytes, filename: str, content_type: str, owner_id: uuid.UUID):
         upload = {
@@ -1027,7 +1041,7 @@ def test_agent_registration_does_not_require_manual_skills_or_capabilities(polis
         "/api/v1/auth/register",
         json={
             "email": "noskills@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "noskills",
         },
     )
@@ -1060,16 +1074,25 @@ def test_task_mvp_lifecycle_with_pending_claim_complete_and_fail(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "task-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "taskowner",
+        },
+    )
+    agent_owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "task-agent-owner@example.com",
+            "password": "Secret123",
+            "username": "taskagentowner",
         },
     )
     assert owner_response.status_code == 200
     owner_token = owner_response.json()["token"]
+    agent_owner_token = agent_owner_response.json()["token"]
 
     agent_response = polis_client.post(
         "/api/v1/agents",
-        headers={"Authorization": f"Bearer {owner_token}"},
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
         json={
             "name": "task-runner",
             "display_name": "Task Runner",
@@ -1179,7 +1202,7 @@ def test_task_publish_uploads_and_returns_input_attachments(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "task-attachments@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "taskattachments",
         },
     )
@@ -1216,19 +1239,28 @@ def test_task_publish_uploads_and_returns_input_attachments(polis_client):
 
 
 def test_user_token_can_claim_start_and_submit_with_owned_agent(polis_client):
-    owner_response = polis_client.post(
+    task_owner_response = polis_client.post(
         "/api/v1/auth/register",
         json={
             "email": "browser-agent-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "browseragentowner",
         },
     )
-    owner_token = owner_response.json()["token"]
+    agent_owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "browser-agent-worker@example.com",
+            "password": "Secret123",
+            "username": "browseragentworker",
+        },
+    )
+    task_owner_token = task_owner_response.json()["token"]
+    agent_owner_token = agent_owner_response.json()["token"]
 
     agent_response = polis_client.post(
         "/api/v1/agents",
-        headers={"Authorization": f"Bearer {owner_token}"},
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
         json={
             "name": "browser-worker",
             "display_name": "Browser Worker",
@@ -1240,7 +1272,7 @@ def test_user_token_can_claim_start_and_submit_with_owned_agent(polis_client):
 
     task_response = polis_client.post(
         "/api/v1/tasks",
-        headers={"Authorization": f"Bearer {owner_token}"},
+        headers={"Authorization": f"Bearer {task_owner_token}"},
         json={
             "title": "Browser claim task",
             "description": "The user should be able to select their agent.",
@@ -1251,7 +1283,7 @@ def test_user_token_can_claim_start_and_submit_with_owned_agent(polis_client):
 
     claim_response = polis_client.post(
         f"/api/v1/tasks/{task_id}/claim",
-        headers={"Authorization": f"Bearer {owner_token}"},
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
         json={"agent_id": agent["id"]},
     )
     assert claim_response.status_code == 200
@@ -1259,14 +1291,14 @@ def test_user_token_can_claim_start_and_submit_with_owned_agent(polis_client):
 
     start_response = polis_client.post(
         f"/api/v1/tasks/{task_id}/start",
-        headers={"Authorization": f"Bearer {owner_token}"},
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
     )
     assert start_response.status_code == 200
     assert start_response.json()["status"] == "in_progress"
 
     submit_response = polis_client.post(
         f"/api/v1/tasks/{task_id}/submit",
-        headers={"Authorization": f"Bearer {owner_token}"},
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
         json={"content": "Submitted from the browser."},
     )
     assert submit_response.status_code == 200
@@ -1278,7 +1310,7 @@ def test_task_budget_reserves_and_pays_credits_to_agent_owner(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "budget-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "budgetowner",
         },
     )
@@ -1286,7 +1318,7 @@ def test_task_budget_reserves_and_pays_credits_to_agent_owner(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "budget-agent-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "budgetagentowner",
         },
     )
@@ -1351,7 +1383,7 @@ def test_task_owner_can_rate_completed_task(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "rate-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "rateowner",
         },
     )
@@ -1359,7 +1391,7 @@ def test_task_owner_can_rate_completed_task(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "rate-agent-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "rateagentowner",
         },
     )
@@ -1435,12 +1467,289 @@ def test_new_user_credit_default_is_100_in_auth_and_migrations():
     assert "ALTER TABLE users ALTER COLUMN credit_balance SET DEFAULT 100" in legacy_migration
 
 
+def test_auth_sets_httponly_cookie_and_cookie_auth_works(polis_client):
+    response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "cookie-auth@example.com",
+            "password": "Secret123",
+            "username": "cookieauth",
+        },
+    )
+
+    assert response.status_code == 200
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "polis_token=" in set_cookie
+    assert "HttpOnly" in set_cookie
+
+    me = polis_client.get("/api/v1/auth/me")
+    assert me.status_code == 200
+    assert me.json()["email"] == "cookie-auth@example.com"
+
+
+def test_weak_registration_password_is_rejected(polis_client):
+    response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "weak-password@example.com",
+            "password": "secret123",
+            "username": "weakpassword",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_task_text_inputs_are_html_escaped_before_storage(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "xss-owner@example.com",
+            "password": "Secret123",
+            "username": "xssowner",
+        },
+    )
+    token = owner_response.json()["token"]
+
+    response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "<img src=x onerror=alert(1)>",
+            "description": "<script>alert(1)</script>",
+        },
+    )
+
+    assert response.status_code == 200
+    task = polis_client.store.tasks[uuid.UUID(response.json()["task_id"])]
+    assert task["title"] == "&lt;img src=x onerror=alert(1)&gt;"
+    assert task["description"] == "&lt;script&gt;alert(1)&lt;/script&gt;"
+
+
+def test_task_cancel_refunds_reserved_budget(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "cancel-refund@example.com",
+            "password": "Secret123",
+            "username": "cancelrefund",
+        },
+    )
+    token = owner_response.json()["token"]
+    owner_id = uuid.UUID(owner_response.json()["user"]["id"])
+
+    create_response = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "Cancel and refund",
+            "description": "The reserved credits should return.",
+            "budget": 20,
+        },
+    )
+    assert create_response.status_code == 200
+    assert polis_client.store.users[owner_id]["credit_balance"] == 80
+
+    cancel_response = polis_client.post(
+        f"/api/v1/tasks/{create_response.json()['task_id']}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert cancel_response.status_code == 200
+    assert polis_client.store.users[owner_id]["credit_balance"] == 100
+
+
+def test_task_fail_refunds_reserved_budget(polis_client):
+    task_owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "fail-refund-owner@example.com",
+            "password": "Secret123",
+            "username": "failrefundowner",
+        },
+    )
+    agent_owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "fail-refund-agent@example.com",
+            "password": "Secret123",
+            "username": "failrefundagent",
+        },
+    )
+    task_owner_token = task_owner_response.json()["token"]
+    task_owner_id = uuid.UUID(task_owner_response.json()["user"]["id"])
+    agent_owner_token = agent_owner_response.json()["token"]
+
+    agent = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {agent_owner_token}"},
+        json={"name": "refund-worker", "auth_method": "none"},
+    ).json()
+    task = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {task_owner_token}"},
+        json={
+            "title": "Fail and refund",
+            "description": "The reserved credits should return on failure.",
+            "budget": 30,
+        },
+    ).json()
+
+    polis_client.post(
+        f"/api/v1/tasks/{task['task_id']}/claim",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+    )
+    polis_client.post(
+        f"/api/v1/tasks/{task['task_id']}/start",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+    )
+    fail_response = polis_client.post(
+        f"/api/v1/tasks/{task['task_id']}/fail",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+        json={"error": "could not complete"},
+    )
+
+    assert fail_response.status_code == 200
+    assert polis_client.store.users[task_owner_id]["credit_balance"] == 100
+
+
+def test_agent_cannot_claim_own_task(polis_client):
+    user_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "self-claim@example.com",
+            "password": "Secret123",
+            "username": "selfclaim",
+        },
+    )
+    token = user_response.json()["token"]
+    agent = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "self-worker", "auth_method": "none"},
+    ).json()
+    task = polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Own task", "description": "Should not be claimable by own agent."},
+    ).json()
+
+    response = polis_client.post(
+        f"/api/v1/tasks/{task['task_id']}/claim",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_agent_cannot_claim_own_job(polis_client):
+    user_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "self-job@example.com",
+            "password": "Secret123",
+            "username": "selfjob",
+        },
+    )
+    token = user_response.json()["token"]
+    agent = polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "self-job-worker", "auth_method": "none"},
+    ).json()
+    job = polis_client.post(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "Own job",
+            "description": "Should not be claimable by own agent.",
+            "required_skill": "general",
+        },
+    ).json()
+
+    response = polis_client.post(
+        f"/api/v1/jobs/{job['id']}/claim",
+        headers={"Authorization": f"Bearer {agent['token']}"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_public_lists_are_redacted_without_auth(polis_client):
+    owner_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "public-owner@example.com",
+            "password": "Secret123",
+            "username": "publicowner",
+        },
+    )
+    token = owner_response.json()["token"]
+    polis_client.post(
+        "/api/v1/agents",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "public-agent", "auth_method": "none"},
+    )
+    polis_client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Public task", "description": "Private-ish task details."},
+    )
+    polis_client.post(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "Public job",
+            "description": "Private-ish job details.",
+            "required_skill": "general",
+        },
+    )
+
+    polis_client.cookies.clear()
+
+    tasks = polis_client.get("/api/v1/tasks").json()
+    agents = polis_client.get("/api/v1/agents").json()
+    jobs = polis_client.get("/api/v1/jobs").json()
+
+    assert set(tasks[0].keys()) == {"id", "title", "status"}
+    assert set(agents[0].keys()) == {"id", "name", "status"}
+    assert set(jobs[0].keys()) == {"id", "title", "status"}
+
+
+def test_health_deep_requires_health_token_when_configured(polis_client, monkeypatch):
+    from app import main as main_module
+
+    original = getattr(main_module.settings, "HEALTH_DEEP_TOKEN", None)
+    object.__setattr__(main_module.settings, "HEALTH_DEEP_TOKEN", "health-secret")
+
+    try:
+        missing = polis_client.get("/health/deep")
+        allowed = polis_client.get("/health/deep", headers={"X-Health-Token": "health-secret"})
+    finally:
+        object.__setattr__(main_module.settings, "HEALTH_DEEP_TOKEN", original)
+
+    assert missing.status_code in {401, 403, 404}
+    assert allowed.status_code == 200
+
+
+def test_security_static_contracts_are_present():
+    root = Path(__file__).resolve().parents[2]
+    main = (root / "backend/app/main.py").read_text()
+    config = (root / "backend/app/config.py").read_text()
+    tasks = (root / "backend/app/routes/tasks.py").read_text()
+
+    assert 'docs_url=None if settings.ENV == "production" else "/docs"' in main
+    assert 'openapi_url=None if settings.ENV == "production" else "/openapi.json"' in main
+    assert "https://polis-frontend-three.vercel.app" in config
+    assert 'logger.exception("Task submission failed")' in tasks
+
+
 def test_community_posts_comments_likes_and_agent_task_share(polis_client):
     owner_response = polis_client.post(
         "/api/v1/auth/register",
         json={
             "email": "community-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "communityowner",
             "display_name": "Community Owner",
         },
@@ -1550,13 +1859,24 @@ def test_polis_v1_happy_path_and_concurrency_guard(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "alice@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "alice",
             "display_name": "Alice",
         },
     )
     assert user_response.status_code == 200
     user_token = user_response.json()["token"]
+    worker_response = polis_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "worker@example.com",
+            "password": "Secret123",
+            "username": "worker",
+            "display_name": "Worker",
+        },
+    )
+    assert worker_response.status_code == 200
+    worker_token = worker_response.json()["token"]
 
     agent_card = {
         "name": "alice-translator",
@@ -1577,7 +1897,7 @@ def test_polis_v1_happy_path_and_concurrency_guard(polis_client):
     }
     agent_response = polis_client.post(
         "/api/v1/agents",
-        headers={"Authorization": f"Bearer {user_token}"},
+        headers={"Authorization": f"Bearer {worker_token}"},
         json={
             "name": "alice-translator",
             "display_name": "Alice Translator",
@@ -1692,7 +2012,7 @@ def test_agent_responses_include_normalized_skills(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "agent-owner@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "agentowner",
         },
     )
@@ -1733,7 +2053,7 @@ def test_job_events_require_authorized_query_token_for_eventsource(polis_client)
         "/api/v1/auth/register",
         json={
             "email": "events@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "events",
         },
     )
@@ -1751,6 +2071,7 @@ def test_job_events_require_authorized_query_token_for_eventsource(polis_client)
     )
     job_id = job_response.json()["id"]
 
+    polis_client.cookies.clear()
     unauth_response = polis_client.get(f"/api/v1/jobs/{job_id}/events?once=true")
     assert unauth_response.status_code == 401
 
@@ -1767,7 +2088,7 @@ def test_job_mine_filters_dashboard_sent_and_received(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "alice-dashboard@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "alicedash",
         },
     )
@@ -1775,7 +2096,7 @@ def test_job_mine_filters_dashboard_sent_and_received(polis_client):
         "/api/v1/auth/register",
         json={
             "email": "bob-dashboard@example.com",
-            "password": "secret123",
+            "password": "Secret123",
             "username": "bobdash",
         },
     )

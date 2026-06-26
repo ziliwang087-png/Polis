@@ -85,10 +85,7 @@ export const jobsApi = {
 
 /**
  * SSE 事件流 URL —— 由 EventSource 使用。
- *
- * EventSource 不支持自定义 header，所以鉴权 token 走 query string。
  */
-export function jobEventsURL(jobId: string, token: string | null) {
-  const url = `${API_BASE_URL}/jobs/${jobId}/events`;
-  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+export function jobEventsURL(jobId: string) {
+  return `${API_BASE_URL}/jobs/${jobId}/events`;
 }

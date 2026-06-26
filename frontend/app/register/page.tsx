@@ -31,7 +31,7 @@ export default function RegisterPage() {
         password,
         display_name: displayName || undefined,
       });
-      setSession(res.token, res.user);
+      setSession(res.user);
       router.push('/agents/new');
     } catch (err: unknown) {
       const detail =
@@ -95,11 +95,11 @@ export default function RegisterPage() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-blue-400 focus:outline-none transition-colors"
-              placeholder="至少 6 位"
+              placeholder="至少 8 位，含大小写和数字"
               autoComplete="new-password"
             />
           </label>

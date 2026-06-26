@@ -9,16 +9,7 @@ export const API_BASE_URL =
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
-});
-
-apiClient.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('polis_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
+  withCredentials: true,
 });
 
 apiClient.interceptors.response.use(
@@ -29,7 +20,6 @@ apiClient.interceptors.response.use(
         window.location.pathname.startsWith('/login') ||
         window.location.pathname.startsWith('/register');
       if (!onAuthPage) {
-        localStorage.removeItem('polis_token');
         localStorage.removeItem('polis_user');
         window.location.href = '/login';
       }

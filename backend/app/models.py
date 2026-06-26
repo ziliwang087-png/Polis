@@ -1,10 +1,31 @@
 """
 Pydantic models for request/response validation
 """
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import html
+import re
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from uuid import UUID
+
+
+def _escape_html_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return html.escape(value, quote=True)
+
+
+def _validate_password_complexity(value: str) -> str:
+    if len(value) < 8:
+        raise ValueError("Password must be at least 8 characters")
+    if not re.search(r"[a-z]", value):
+        raise ValueError("Password must include a lowercase letter")
+    if not re.search(r"[A-Z]", value):
+        raise ValueError("Password must include an uppercase letter")
+    if not re.search(r"\d", value):
+        raise ValueError("Password must include a number")
+    return value
 
 # ============ Auth Models ============
 
@@ -12,10 +33,20 @@ class RegisterRequest(BaseModel):
     """统一注册请求 — 前端 /auth/register"""
     username: str = Field(..., min_length=3, max_length=64)
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     user_type: Literal["owner", "agent"] = "owner"
     display_name: Optional[str] = None
     organization: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def password_is_complex(cls, value: str) -> str:
+        return _validate_password_complexity(value)
+
+    @field_validator("username", "display_name", "organization")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
 
 
 class LoginRequest(BaseModel):
@@ -97,6 +128,11 @@ class TaskCreateRequest(BaseModel):
     priority: Optional[Literal["low", "normal", "urgent"]] = "normal"
     deliverable_type: Optional[str] = None
     attachments: List[AttachmentInput] = Field(default_factory=list)
+
+    @field_validator("title", "description", "category", "difficulty", "deliverable_type")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
 
 class TaskCreateResponse(BaseModel):
     task_id: UUID
@@ -201,6 +237,11 @@ class TaskSubmitRequest(BaseModel):
     evidence_urls: Optional[List[Dict[str, str]]] = None
     work_log: Optional[List[Dict[str, Any]]] = None
 
+    @field_validator("content", "deliverable_url")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 class TaskSubmitResponse(BaseModel):
     submission_id: UUID
     result_hash: Optional[str]
@@ -288,6 +329,11 @@ class CommunityPostCreateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     category: CommunityCategory
 
+    @field_validator("title", "content")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 
 class CommunityPostCreateResponse(BaseModel):
     post_id: UUID
@@ -316,6 +362,11 @@ class CommunityPostListResponse(BaseModel):
 class CommunityCommentCreateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
 
+    @field_validator("content")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 
 class CommunityCommentResponse(BaseModel):
     id: UUID
@@ -341,15 +392,30 @@ class AgentTaskShareRequest(BaseModel):
     summary: str = Field(..., min_length=1, max_length=5000)
     category: CommunityCategory = "showcase"
 
+    @field_validator("task_title", "summary")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 
 # ============ Polis v1 A2A-compatible Models ============
 
 class UserRegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     username: str = Field(..., min_length=3, max_length=64)
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def password_is_complex(cls, value: str) -> str:
+        return _validate_password_complexity(value)
+
+    @field_validator("username", "display_name")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
 
 
 class UserLoginRequest(BaseModel):
@@ -403,6 +469,11 @@ class AgentCreateRequest(BaseModel):
                     "skills declared in agent_card.skills.",
     )
 
+    @field_validator("name", "display_name", "description", "endpoint_url", "websocket_id")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 
 class AgentHeartbeatRequest(BaseModel):
     status: Literal["online", "offline", "busy"] = "online"
@@ -442,6 +513,11 @@ class JobCreateRequest(BaseModel):
     input_messages: List[Dict[str, Any]] = Field(default_factory=list)
     attachments: List[AttachmentInput] = Field(default_factory=list)
 
+    @field_validator("title", "description", "required_skill")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 
 class JobClaimRequest(BaseModel):
     agent_id: Optional[UUID] = None
@@ -450,6 +526,11 @@ class JobClaimRequest(BaseModel):
 class JobProgressRequest(BaseModel):
     progress: str = Field(..., min_length=1)
     agent_id: Optional[UUID] = None
+
+    @field_validator("progress")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
 
 
 class JobArtifactRequest(BaseModel):
@@ -462,10 +543,20 @@ class JobArtifactRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     agent_id: Optional[UUID] = None
 
+    @field_validator("content", "file_url", "filename", "mime")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
+
 
 class JobRatingRequest(BaseModel):
     stars: int = Field(..., ge=1, le=5)
     feedback: Optional[str] = None
+
+    @field_validator("feedback")
+    @classmethod
+    def escape_text_fields(cls, value: Optional[str]) -> Optional[str]:
+        return _escape_html_text(value)
 
 
 class JobArtifactResponse(BaseModel):

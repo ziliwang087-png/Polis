@@ -9,13 +9,13 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, status, Depends, Query
+from fastapi import APIRouter, Cookie, Header, HTTPException, status, Depends, Query
 from psycopg2.extras import Json
 from starlette.responses import StreamingResponse
 
 from app.auth import create_access_token
 from app.database import get_db_connection
-from app.dependencies import get_current_owner, get_current_user
+from app.dependencies import get_current_owner, get_current_user, try_get_current_user
 from app.models import AgentCreateRequest, AgentHeartbeatRequest, AgentResponse
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -210,11 +210,12 @@ def create_agent(
         )
 
 
-@router.get("", response_model=List[AgentResponse])
+@router.get("", response_model=None)
 def list_agents(
     mine: bool = False,
     skill: Optional[str] = None,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
     """List agents. Add ?mine=true (with auth) to filter to caller-owned only.
     Add ?skill=foo to filter to agents declaring that capability."""
@@ -225,7 +226,7 @@ def list_agents(
         if mine:
             # mine=true requires auth; resolve owner from token
             try:
-                subject_id, subject_type = get_current_user(authorization)
+                subject_id, subject_type = get_current_user(authorization, polis_token)
             except HTTPException:
                 # Not authed -> empty list (don't 401, the page handles it)
                 return []
@@ -243,7 +244,17 @@ def list_agents(
             sql += " WHERE " + " AND ".join(wheres)
         sql += " ORDER BY created_at DESC"
         cur.execute(sql, params)
-        return [_agent_response_with_skills(cur, row) for row in cur.fetchall()]
+        rows = cur.fetchall()
+        if not try_get_current_user(authorization, polis_token):
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "status": row.get("status", "offline"),
+                }
+                for row in rows
+            ]
+        return [_agent_response_with_skills(cur, row) for row in rows]
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
@@ -262,8 +273,9 @@ def heartbeat(
     agent_id: UUID,
     request: AgentHeartbeatRequest,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
-    subject_id, subject_type = get_current_user(authorization)
+    subject_id, subject_type = get_current_user(authorization, polis_token)
 
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -318,6 +330,7 @@ def delete_agent(agent_id: UUID, owner_id: UUID = Depends(get_current_owner)):
 async def stream_agent_inbox(
     agent_id: UUID,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
     once: bool = Query(False, description="Return current matches then close"),
 ):
     """
@@ -336,7 +349,7 @@ async def stream_agent_inbox(
     """
     from app.routes.jobs import _build_inbox_generator, _agent_skill_set, _agent_owned_by, _sse_raw
 
-    subject_id, subject_type = get_current_user(authorization)
+    subject_id, subject_type = get_current_user(authorization, polis_token)
 
     with get_db_connection() as conn:
         cur = conn.cursor()

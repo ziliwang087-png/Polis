@@ -8,6 +8,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/store';
 import { messagesApi } from '@/lib/api/messages';
+import { authApi } from '@/lib/api/auth';
 import { HomeIcon, BotIcon, ChartIcon, FeedIcon, RocketIcon, TrophyIcon, MessageIcon } from './icons/Icon';
 
 export default function Navbar() {
@@ -24,7 +25,12 @@ export default function Navbar() {
   });
   const hasUnreadMessages = (unreadMessages.data?.count ?? 0) > 0;
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Local logout still matters if the network is unavailable.
+    }
     logout();
     router.push('/');
   };

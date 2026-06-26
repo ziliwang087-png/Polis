@@ -1,7 +1,7 @@
 """
 Task API routes
 """
-from fastapi import APIRouter, HTTPException, status, Depends, Query, Header
+from fastapi import APIRouter, Cookie, HTTPException, status, Depends, Query, Header
 from uuid import UUID
 from typing import Any, Dict, Optional, List
 import base64
@@ -21,7 +21,7 @@ from app.models import (
     AgentTasksResponse, AttachmentInput, TaskClaimRequest
 )
 from app.database import get_db_connection
-from app.dependencies import get_current_owner, get_current_agent, get_current_user
+from app.dependencies import get_current_owner, get_current_agent, get_current_user, try_get_current_user
 from app.fraud_detection import detect_collusion
 from app.services import anti_fraud as anti_fraud_svc
 from app.services import storage
@@ -131,9 +131,37 @@ def _agent_owned_by_user(cur, agent_id: UUID, user_id: UUID):
     return agent
 
 
+def _agent_owner_id(cur, agent_id: UUID) -> UUID:
+    cur.execute("SELECT owner_id FROM agents WHERE id = %s", (str(agent_id),))
+    agent = cur.fetchone()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return UUID(str(agent["owner_id"]))
+
+
+def _assert_not_self_claim(cur, agent_id: UUID, owner_id: UUID):
+    if _ids_equal(_agent_owner_id(cur, agent_id), owner_id):
+        raise HTTPException(status_code=403, detail="Cannot claim your own task")
+
+
+def _refund_task_budget(cur, task) -> None:
+    reward_points = int(task.get("reward_points") or 0)
+    if reward_points <= 0:
+        return
+    cur.execute(
+        """
+        UPDATE users
+        SET credit_balance = credit_balance + %s, updated_at = NOW()
+        WHERE id = %s
+        """,
+        (reward_points, str(task["owner_id"])),
+    )
+
+
 def _resolve_agent_for_token(
     cur,
     authorization: Optional[str],
+    polis_token: Optional[str] = None,
     requested_agent_id: Optional[UUID] = None,
     assigned_agent_id: Optional[UUID] = None,
 ) -> UUID:
@@ -158,7 +186,7 @@ def _resolve_agent_for_token(
     Raises:
         HTTPException: 403 如果验证失败
     """
-    subject_id, subject_type = get_current_user(authorization)
+    subject_id, subject_type = get_current_user(authorization, polis_token)
     if subject_type == "agent":
         if requested_agent_id and not _ids_equal(requested_agent_id, subject_id):
             raise HTTPException(status_code=403, detail="Agent token does not match requested agent")
@@ -303,10 +331,12 @@ def create_task(
             detail="Task creation failed"
         )
 
-@router.get("", response_model=List[TaskListResponse])
+@router.get("", response_model=None)
 def list_tasks(
     status_filter: Optional[str] = Query(None, alias="status"),
-    category: Optional[str] = Query(None)
+    category: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
     """List tasks with optional filters."""
     try:
@@ -333,6 +363,15 @@ def list_tasks(
             cur.execute(query, params)
             tasks = cur.fetchall()
 
+            if not try_get_current_user(authorization, polis_token):
+                return [
+                    {
+                        "id": task["id"],
+                        "title": task["title"],
+                        "status": task["status"],
+                    }
+                    for task in tasks
+                ]
             return [TaskListResponse(**dict(task)) for task in tasks]
 
     except Exception as e:
@@ -382,6 +421,7 @@ def claim_task(
     task_id: UUID,
     request: Optional[TaskClaimRequest] = None,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
     agent_id: Optional[UUID] = None,
 ):
     """Agent claims an open task."""
@@ -389,7 +429,7 @@ def claim_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, status, assigned_agent_id, owner_id, title, reward_points FROM tasks WHERE id = %s FOR UPDATE",
+                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),),
             )
             task = cur.fetchone()
@@ -401,9 +441,11 @@ def claim_task(
                 agent_id = _resolve_agent_for_token(
                     cur,
                     authorization,
+                    polis_token,
                     requested_agent_id=request.agent_id if request else None,
                     assigned_agent_id=task.get("assigned_agent_id"),
                 )
+            _assert_not_self_claim(cur, agent_id, task["owner_id"])
             assigned_agent_id = task.get("assigned_agent_id")
             if assigned_agent_id and not _ids_equal(assigned_agent_id, agent_id):
                 raise HTTPException(status_code=403, detail="Task is reserved for another agent")
@@ -445,6 +487,7 @@ def claim_task(
 def start_task(
     task_id: UUID,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
     agent_id: Optional[UUID] = None,
 ):
     """Assigned agent starts a claimed task."""
@@ -452,7 +495,7 @@ def start_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                "SELECT id, status, assigned_agent_id, owner_id, title, reward_points FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),),
             )
             task = cur.fetchone()
@@ -462,6 +505,7 @@ def start_task(
                 agent_id = _resolve_agent_for_token(
                     cur,
                     authorization,
+                    polis_token,
                     assigned_agent_id=task.get("assigned_agent_id"),
                 )
             if not _ids_equal(task.get("assigned_agent_id"), agent_id):
@@ -516,7 +560,7 @@ def accept_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, status, assigned_agent_id, owner_id, title FROM tasks WHERE id = %s FOR UPDATE",
+                "SELECT id, status, assigned_agent_id, owner_id, title, reward_points FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),),
             )
             task = cur.fetchone()
@@ -635,6 +679,10 @@ def cancel_task(
                 raise HTTPException(status_code=403, detail="You don't own this task")
             if task["status"] == "completed":
                 raise HTTPException(status_code=409, detail="Completed tasks cannot be cancelled")
+            if task["status"] in ("cancelled", "failed"):
+                raise HTTPException(status_code=409, detail="Task is already closed")
+
+            _refund_task_budget(cur, task)
 
             cur.execute(
                 """
@@ -665,6 +713,7 @@ def fail_task(
     task_id: UUID,
     request: TaskFailRequest,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
     agent_id: Optional[UUID] = None,
 ):
     """Agent marks an in-progress task as failed."""
@@ -672,7 +721,7 @@ def fail_task(
         with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, status, assigned_agent_id FROM tasks WHERE id = %s FOR UPDATE",
+                "SELECT id, status, assigned_agent_id, owner_id, reward_points FROM tasks WHERE id = %s FOR UPDATE",
                 (str(task_id),),
             )
             task = cur.fetchone()
@@ -682,12 +731,15 @@ def fail_task(
                 agent_id = _resolve_agent_for_token(
                     cur,
                     authorization,
+                    polis_token,
                     assigned_agent_id=task.get("assigned_agent_id"),
                 )
             if not _ids_equal(task.get("assigned_agent_id"), agent_id):
                 raise HTTPException(status_code=403, detail="You are not assigned to this task")
             if task["status"] != "in_progress":
                 raise HTTPException(status_code=409, detail="Task is not in progress")
+
+            _refund_task_budget(cur, task)
 
             cur.execute(
                 """
@@ -878,6 +930,7 @@ def assign_task(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Agent not found"
                 )
+            _assert_not_self_claim(cur, request.agent_id, owner_id)
 
             # Update task
             cur.execute(
@@ -927,6 +980,7 @@ def submit_task(
     task_id: UUID,
     request: TaskSubmitRequest,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
     agent_id: Optional[UUID] = None,
 ):
     """Agent submits task deliverable"""
@@ -950,6 +1004,7 @@ def submit_task(
                 agent_id = _resolve_agent_for_token(
                     cur,
                     authorization,
+                    polis_token,
                     requested_agent_id=request.agent_id,
                     assigned_agent_id=task.get("assigned_agent_id"),
                 )
@@ -1008,8 +1063,8 @@ def submit_task(
             
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Task submission failed: {e}")
+    except Exception:
+        logger.exception("Task submission failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task submission failed"

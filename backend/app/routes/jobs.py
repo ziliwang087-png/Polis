@@ -9,14 +9,14 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Cookie, Depends, Header, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
 from psycopg2.extras import Json
 from starlette.responses import StreamingResponse
 
 from app.auth import decode_access_token
 from app.database import get_db_connection
-from app.dependencies import get_current_owner, get_current_user
+from app.dependencies import get_current_owner, get_current_user, try_get_current_user
 from app.models import (
     AttachmentInput,
     JobArtifactRequest,
@@ -272,8 +272,13 @@ def _batch_job_responses(cur, job_rows) -> List[JobResponse]:
     ]
 
 
-def _agent_for_token(cur, authorization: Optional[str], request_agent_id: Optional[UUID]) -> Dict[str, Any]:
-    subject_id, subject_type = get_current_user(authorization)
+def _agent_for_token(
+    cur,
+    authorization: Optional[str],
+    request_agent_id: Optional[UUID],
+    polis_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    subject_id, subject_type = get_current_user(authorization, polis_token)
     agent_id = subject_id if subject_type == "agent" else request_agent_id
     if not agent_id:
         raise HTTPException(
@@ -315,11 +320,14 @@ def _subject_from_token_value(token: str) -> tuple[UUID, str]:
 def _subject_from_event_auth(
     authorization: Optional[str],
     token: Optional[str],
+    polis_token: Optional[str],
 ) -> tuple[UUID, str]:
     if authorization:
-        return get_current_user(authorization)
+        return get_current_user(authorization, polis_token)
     if token:
         return _subject_from_token_value(token)
+    if polis_token:
+        return get_current_user(None, polis_token)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authorization header or token query parameter required",
@@ -424,12 +432,13 @@ def create_job(
         )
 
 
-@router.get("", response_model=List[JobResponse])
+@router.get("", response_model=None)
 def list_jobs(
     status_filter: Optional[str] = Query(None, alias="status"),
     skill: Optional[str] = Query(None),
     mine: Optional[str] = Query(None, pattern="^(sent|received)$"),
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -442,7 +451,7 @@ def list_jobs(
             query += " AND required_skill = %s"
             params.append(skill)
         if mine:
-            subject_id, subject_type = get_current_user(authorization)
+            subject_id, subject_type = get_current_user(authorization, polis_token)
             if subject_type != "user":
                 raise HTTPException(status_code=403, detail="User token required")
             if mine == "sent":
@@ -458,6 +467,15 @@ def list_jobs(
         query += " ORDER BY created_at DESC LIMIT 20"
         cur.execute(query, params)
         job_rows = cur.fetchall()
+        if not try_get_current_user(authorization, polis_token):
+            return [
+                {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "status": row["status"],
+                }
+                for row in job_rows
+            ]
         return _batch_job_responses(cur, job_rows)
 
 
@@ -477,6 +495,7 @@ def claim_job(
     job_id: UUID,
     request: Optional[JobClaimRequest] = Body(default=None),
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -484,6 +503,7 @@ def claim_job(
             cur,
             authorization,
             request.agent_id if request else None,
+            polis_token,
         )
 
         cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (str(job_id),))
@@ -492,6 +512,8 @@ def claim_job(
             raise HTTPException(status_code=404, detail="Job not found")
         if job["status"] != "submitted":
             raise HTTPException(status_code=409, detail="Job is already claimed")
+        if job["from_user_id"] == agent["owner_id"]:
+            raise HTTPException(status_code=403, detail="Cannot claim your own job")
 
         cur.execute(
             """
@@ -522,10 +544,11 @@ def update_progress(
     job_id: UUID,
     request: JobProgressRequest,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
-        agent = _agent_for_token(cur, authorization, request.agent_id)
+        agent = _agent_for_token(cur, authorization, request.agent_id, polis_token)
         cur.execute("SELECT * FROM jobs WHERE id = %s", (str(job_id),))
         job = cur.fetchone()
         if not job:
@@ -556,10 +579,11 @@ def submit_artifact(
     job_id: UUID,
     request: JobArtifactRequest,
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
     with get_db_connection() as conn:
         cur = conn.cursor()
-        agent = _agent_for_token(cur, authorization, request.agent_id)
+        agent = _agent_for_token(cur, authorization, request.agent_id, polis_token)
         cur.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (str(job_id),))
         job = cur.fetchone()
         if not job:
@@ -632,6 +656,10 @@ def cancel_job(job_id: UUID, user_id: UUID = Depends(get_current_owner)):
             (str(job_id),),
         )
         job = cur.fetchone()
+        cur.execute(
+            "UPDATE users SET credit_balance = credit_balance + 1, updated_at = NOW() WHERE id = %s",
+            (str(user_id),),
+        )
         _insert_event(cur, job["id"], "canceled", _event_payload(user_id=user_id))
         return _job_response(cur, job)
 
@@ -819,8 +847,9 @@ async def stream_job_events(
     once: bool = Query(False, description="Return current events then close"),
     token: Optional[str] = Query(None, description="Bearer token for EventSource clients"),
     authorization: Optional[str] = Header(None),
+    polis_token: Optional[str] = Cookie(None),
 ):
-    subject_id, subject_type = _subject_from_event_auth(authorization, token)
+    subject_id, subject_type = _subject_from_event_auth(authorization, token, polis_token)
     with get_db_connection() as conn:
         cur = conn.cursor()
         _assert_job_event_access(cur, job_id, subject_id, subject_type)
